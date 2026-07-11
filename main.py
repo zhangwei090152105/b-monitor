@@ -580,7 +580,7 @@ def send_wecom(stockout, stockin):
         parts.append(f'{i}. {brand}·{tp}　{n}单 / 待入 {int(q):,}件\n')
     parts.append('\n\n\n')
     if MIAODA_URL:
-        parts.append(f'🔗 查看数字看板')
+        parts.append(f'{MIAODA_URL}')
         parts.append('\n\n')
     parts.append(f'🕐 {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
 

@@ -1,0 +1,1030 @@
+
+
+(function(){
+var isDark = localStorage.getItem('b-monitor-theme') !== 'light';
+if (!isDark) document.documentElement.setAttribute('data-theme','light');
+
+var App = window.App = {
+  DATA: DATA,
+  allRecords: DATA.records,
+  filtered: [],
+  pageSize: parseInt(localStorage.getItem('b-monitor-pageSize')||50),
+  curPage: 0,
+  sortCol: -1,
+  sortDir: 1,
+  filterState: {bizTypes:[], shops:[], brands:[], repos:[], search:''},
+  COL_MAP: [13,1,12,2,3,4,11,5,6,14,7,9,10],
+  COL_NAMES: ['申请时间','单据类型','业务类型','仓库','单号','关联单号','店铺','品牌','货品','商品条码','申请数量','未完结数量','完结率'],
+  charts: {},
+  refreshTimer: null,
+  countdownTimer: null,
+  countdownSecs: 300,
+  autoRefresh: localStorage.getItem('b-monitor-auto-refresh')!=='off',
+  expandedRow: -1,
+  chartLinkFilter: null,
+
+  fmt: function(n){return n!=null?n.toLocaleString('en-US'):'0'},
+  fmtPct: function(v){return (v!=null?v:0).toFixed(1)+'%'},
+  escHtml: function(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')},
+  fmtDate: function(ts){var d=new Date(ts);return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2)},
+
+  init: function(){
+    var self=this;
+    try{
+      /* #21 Theme init */
+      if(!isDark)document.getElementById('themeBtn').textContent='\u2600\ufe0f';
+
+      var now=new Date();
+      document.getElementById('genTime').textContent=self.fmtDate(Date.now());
+      document.getElementById('lastRefresh').textContent=self.fmtDate(Date.now());
+
+      /* #14 Restore state */
+      self.restoreState();
+
+      self.renderKPIs();
+      self.renderProgress();
+      self.renderTop5();
+      self.buildFilters();
+      self.applyFilters();
+
+      // Hide skeleton, show content
+      setTimeout(function(){
+        document.getElementById('skeleton').classList.add('hidden');
+        document.getElementById('mainContent').style.display='';
+        setTimeout(function(){self.renderCharts()},100);
+      },300);
+      setTimeout(function(){self.animateProgress()},200);
+      self.startStatusBar();
+      document.addEventListener('keydown',function(e){self.handleKeyboard(e)});
+      self.storeSnapshot();
+
+      // Click outside closes dropdowns
+      document.addEventListener('click',function(e){
+        document.querySelectorAll('.ms-dropdown.open').forEach(function(dd){
+          if(!dd.parentElement.contains(e.target))dd.classList.remove('open');
+        });
+        // Close col panel
+        var cp=document.getElementById('colPanel');
+        if(cp&&cp.classList.contains('open')&&!e.target.closest('#colPanel')&&!e.target.closest('.btn-icon')){
+          cp.classList.remove('open');
+        }
+      });
+
+      window.addEventListener('resize',function(){
+        Object.keys(self.charts).forEach(function(id){
+          var inst=self.charts[id];if(inst&&!inst.isDisposed())inst.resize();
+        });
+      });
+
+      /* #16 Pagination: restore page size from localStorage */
+      self.buildColPanel();
+      self.renderSummaryStats();
+
+      /* #18 Alert banner */
+      if(DATA.soRate===0 && sessionStorage.getItem('b-monitor-alert-dismissed')!=='1'){
+        var ab=document.getElementById('alertBanner');
+        if(ab){ab.classList.add('show');ab.querySelector('span').textContent='\u26a0 出库单据完结率为 0%，存在 '+self.fmt(DATA.soNos)+' 条未完结单据，点击查看'}
+      }
+
+      /* #20 URL hash */
+      self.restoreFromHash();
+      window.addEventListener('hashchange',function(){self.restoreFromHash()});
+
+    }catch(e){console.error('Init error:',e)}
+  },
+
+  /* #14 SessionStorage state */
+  saveState: function(){
+    try{
+      var st={filterState:this.filterState,sortCol:this.sortCol,sortDir:this.sortDir,curPage:this.curPage,pageSize:this.pageSize,search:document.getElementById('searchInput').value,chartLinkFilter:this.chartLinkFilter};
+      sessionStorage.setItem('b-monitor-state',JSON.stringify(st));
+    }catch(e){}
+  },
+  restoreState: function(){
+    try{
+      var raw=sessionStorage.getItem('b-monitor-state');
+      if(!raw)return;
+      var st=JSON.parse(raw);
+      if(st.filterState)this.filterState=st.filterState;
+      if(st.sortCol!=null)this.sortCol=st.sortCol;
+      if(st.sortDir!=null)this.sortDir=st.sortDir;
+      if(st.curPage!=null)this.curPage=st.curPage;
+      if(st.pageSize)this.pageSize=st.pageSize;
+      if(st.search)document.getElementById('searchInput').value=st.search;
+      if(st.chartLinkFilter)this.chartLinkFilter=st.chartLinkFilter;
+    }catch(e){}
+  },
+
+  /* #5, #8, #15 Status Bar */
+  startStatusBar: function(){
+    var self=this;
+    function updateClock(){
+      var d=new Date();
+      document.getElementById('liveClock').textContent=('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2);
+    }
+    function updateCountdown(){
+      if(!self.autoRefresh){document.getElementById('countdownLabel').textContent='自动刷新已关闭';return}
+      self.countdownSecs--;
+      if(self.countdownSecs<=0){location.reload();return}
+      var m=Math.floor(self.countdownSecs/60),s=self.countdownSecs%60;
+      document.getElementById('countdownLabel').textContent='下次刷新 '+('0'+m).slice(-2)+':'+('0'+s).slice(-2);
+    }
+    updateClock();
+    if(this.autoRefresh){
+      document.getElementById('autoRefreshToggle').checked=true;
+      document.getElementById('statusDot').className='status-dot';
+      document.getElementById('statusLabel').textContent='在线';
+    }else{
+      document.getElementById('autoRefreshToggle').checked=false;
+      document.getElementById('statusDot').className='status-dot off';
+      document.getElementById('statusLabel').textContent='已关闭';
+    }
+    this.refreshTimer=setInterval(updateClock,1000);
+    this.countdownTimer=setInterval(updateCountdown,1000);
+    if(!this.autoRefresh)updateCountdown();
+  },
+
+  manualRefresh: function(){location.reload()},
+  toggleAutoRefresh: function(){
+    var cb=document.getElementById('autoRefreshToggle');
+    this.autoRefresh=cb.checked;
+    localStorage.setItem('b-monitor-auto-refresh',this.autoRefresh?'on':'off');
+    if(this.autoRefresh){
+      document.getElementById('statusDot').className='status-dot';
+      document.getElementById('statusLabel').textContent='在线';
+      this.countdownSecs=300;
+    }else{
+      document.getElementById('statusDot').className='status-dot off';
+      document.getElementById('statusLabel').textContent='已关闭';
+    }
+  },
+
+  /* #15 Store snapshot */
+  storeSnapshot: function(){
+    try{
+      var snap={soNos:DATA.soNos,soUnouted:DATA.soUnouted,siNos:DATA.siNos,siUninner:DATA.siUninner};
+      localStorage.setItem('jkBMonitorSnap',JSON.stringify(snap));
+    }catch(e){}
+  },
+
+  /* #3 Animate progress bars */
+  animateProgress: function(){
+    var soRate=DATA.soRate||0,siRate=DATA.siRate||0;
+    document.getElementById('soBarNos').style.width=soRate+'%';
+    document.getElementById('soBarQty').style.width=soRate+'%';
+    document.getElementById('siBarNos').style.width=siRate+'%';
+    document.getElementById('siBarQty').style.width=siRate+'%';
+  },
+
+  /* #4 KPI scroll animation */
+  animateKPI: function(el,targetVal){
+    if(targetVal===0){el.textContent='--';return}
+    var start=0,duration=1500,startTime=null;
+    function step(ts){
+      if(!startTime)startTime=ts;
+      var progress=Math.min((ts-startTime)/duration,1);
+      var eased=1-Math.pow(1-progress,4);
+      var current=Math.floor(eased*targetVal);
+      el.textContent=current.toLocaleString('en-US');
+      if(progress<1)requestAnimationFrame(step);
+      else{el.textContent=targetVal.toLocaleString('en-US');el.style.animation='numberGlow 0.4s ease-out'}
+    }
+    requestAnimationFrame(step);
+  },
+
+  /* #15, #16 Render KPIs with change indicators and alerts */
+  renderKPIs: function(){
+    try{
+      var self=this;
+      var prev=null;
+      try{var raw=localStorage.getItem('jkBMonitorSnap');if(raw)prev=JSON.parse(raw)}catch(e){}
+
+      function setKPI(id,val,chgId,delay){
+        var el=document.getElementById(id);
+        if(!el)return;
+        setTimeout(function(){self.animateKPI(el,val)},delay);
+        if(!prev)return;
+        var k=id.replace('Val','');
+        var prevVal=null;
+        if(k==='soNos')prevVal=prev.soNos;
+        else if(k==='soUnouted')prevVal=prev.soUnouted;
+        else if(k==='siNos')prevVal=prev.siNos;
+        else if(k==='siUninner')prevVal=prev.siUninner;
+        if(prevVal!=null&&prevVal!==val){
+          var diff=val-prevVal,chgEl=document.getElementById(chgId);
+          if(chgEl){
+            if(diff>0){chgEl.textContent='\u2191 '+self.fmt(diff);chgEl.className='kpi-change up'}
+            else if(diff<0){chgEl.textContent='\u2193 '+self.fmt(Math.abs(diff));chgEl.className='kpi-change down'}
+          }
+        }
+      }
+      setKPI('soNosVal',DATA.soNos,      'soNosChg',0);
+      setKPI('soUnoutedVal',DATA.soUnouted,'soUnoutedChg',150);
+      setKPI('siNosVal',DATA.siNos,      'siNosChg',300);
+      setKPI('siUninnerVal',DATA.siUninner,'siUninnerChg',450);
+
+      // Alert thresholds (#16)
+      function setAlert(elId,rate){
+        var el=document.getElementById(elId);if(!el)return;
+        el.className='kpi-alert';
+        if(rate===0)el.classList.add('red');
+        else if(rate<50)el.classList.add('yellow');
+        else el.classList.add('green');
+      }
+      setAlert('soAlert',DATA.soRate||0);
+      setAlert('soUnoutedAlert',DATA.soRate||0);
+      setAlert('siAlert',DATA.siRate||0);
+      setAlert('siUninnerAlert',DATA.siRate||0);
+    }catch(e){console.error('renderKPIs error:',e)}
+  },
+
+  renderProgress: function(){
+    try{
+      var soRate=DATA.soRate||0,siRate=DATA.siRate||0;
+      document.getElementById('soPctNos').textContent=this.fmtPct(soRate);
+      document.getElementById('soPctQty').textContent=this.fmtPct(soRate);
+      document.getElementById('siPctNos').textContent=this.fmtPct(siRate);
+      document.getElementById('siPctQty').textContent=this.fmtPct(siRate);
+      document.getElementById('soSummaryNos').textContent=this.fmt(DATA.soNos);
+      document.getElementById('soSummaryQty').textContent=this.fmt(DATA.soUnouted);
+      document.getElementById('siSummaryNos').textContent=this.fmt(DATA.siNos);
+      document.getElementById('siSummaryQty').textContent=this.fmt(DATA.siUninner);
+    }catch(e){console.error('renderProgress error:',e)}
+  },
+
+  renderTop5Item: function(item,isCombo){
+    var name=item[0];
+    if(isCombo && name.indexOf('|')>=0){
+      var parts=name.split('|');
+      return '<div class="top5-info"><div class="top5-name">'+this.escHtml(parts[0])+'</div><div class="top5-sub">'+this.escHtml(parts[1])+'</div></div>';
+    }
+    return '<div class="top5-info"><div class="top5-name">'+this.escHtml(name)+'</div></div>';
+  },
+
+  renderTop5List: function(data,cid,cls,isCombo,clickKey,clickCol){
+    var self=this,h='';
+    data.forEach(function(item,i){
+      var rk=i<3?(' r'+(i+1)):'';
+      var name=isCombo?(item[0].split('|')[0]):item[0];
+      h+='<li class="top5-item" data-name="'+self.escHtml(name)+'" data-col="'+(clickCol||'')+'" onclick="App.top5Click(this,\''+(clickKey||'')+'\')" title="点击查看明细">'+
+        '<div class="top5-rank'+rk+'">'+(i+1)+'</div>'+
+        self.renderTop5Item(item,isCombo)+
+        '<span class="top5-qty '+cls+'">'+self.fmt(item[2])+'</span>'+
+        '<span class="top5-nos">'+self.fmt(item[1])+'单</span></li>';
+    });
+    document.getElementById(cid).innerHTML=h;
+  },
+
+  renderTop5: function(){
+    try{
+      this.renderTop5List(DATA.soComboTop5,'soComboTop5','so',true,'bizTypes','');
+      this.renderTop5List(DATA.siComboTop5,'siComboTop5','si',true,'bizTypes','');
+      this.renderTop5List(DATA.soTop5,'soBrandTop5','so',false,'brands','brand');
+      this.renderTop5List(DATA.siTop5,'siBrandTop5','si',false,'brands','brand');
+    }catch(e){console.error('renderTop5 error:',e)}
+  },
+
+  /* #11 TOP5 click drill */
+  top5Click: function(el,key){
+    var wasActive=el.classList.contains('active');
+    // Clear all active
+    document.querySelectorAll('.top5-item.active').forEach(function(item){item.classList.remove('active')});
+    // Clear chart highlight
+    this.clearChartHighlight();
+    if(wasActive){
+      this.filterState[key]=[];
+      this.filterState.brands=[];
+      this.applyFilters();
+      this.renderFilterTags();
+      return;
+    }
+    el.classList.add('active');
+    var name=el.getAttribute('data-name');
+    if(key==='brands'||el.getAttribute('data-col')==='brand'){
+      this.filterState.brands=[name];
+      this.filterState.bizTypes=[];
+    }else{
+      this.filterState.bizTypes=[name];
+      this.filterState.brands=[];
+    }
+    this.applyFilters();
+    this.renderFilterTags();
+  },
+
+  /* ==== ECharts helpers (#7, #8, #9, #23) ==== */
+  getChart: function(domId){
+    var dom=document.getElementById(domId);
+    if(!dom)return null;
+    if(dom.querySelector('.chart-placeholder'))dom.querySelector('.chart-placeholder').remove();
+    var inst=this.charts[domId];
+    if(!inst||inst.isDisposed()){
+      echarts.dispose(dom);
+      var isDark=document.documentElement.getAttribute('data-theme')!=='light';
+      inst=echarts.init(dom);
+      this.charts[domId]=inst;
+    }
+    return inst;
+  },
+
+  outGradient: function(){
+    return new echarts.graphic.LinearGradient(0,0,1,0,[{offset:0,color:'#F59E0B'},{offset:1,color:'#FCD34D'}]);
+  },
+  inGradient: function(){
+    return new echarts.graphic.LinearGradient(0,0,1,0,[{offset:0,color:'#3B82F6'},{offset:1,color:'#93C5FD'}]);
+  },
+
+  /* #9 unified tooltip */
+  makeTooltip: function(extra){
+    return Object.assign({
+      backgroundColor:'rgba(26,34,51,0.95)',
+      borderColor:'rgba(255,255,255,0.1)',
+      borderWidth:1,
+      borderRadius:8,
+      padding:[10,14],
+      textStyle:{color:'#D0D7E8',fontSize:12},
+      extraCssText:'box-shadow: 0 8px 32px rgba(0,0,0,0.4); backdrop-filter: blur(8px);'
+    },extra||{});
+  },
+
+  makePieChart: function(domId,dataItems,colors){
+    try{
+      var chart=this.getChart(domId);
+      if(!chart){document.getElementById(domId).innerHTML='<div class="chart-placeholder">图表加载失败</div>';return}
+      var self=this,originals=dataItems.map(function(d){return d[0]});
+      var names=dataItems.map(function(d){return d[0].length>18?d[0].slice(0,16)+'...':d[0]});
+      var vals=dataItems.map(function(d){return d[1]});
+      var total=vals.reduce(function(a,b){return a+b},0);
+      chart.off('click');
+      chart.setOption({
+        tooltip:this.makeTooltip({trigger:'item',formatter:function(p){return p.name+': '+self.fmt(p.value)+' ('+p.percent+'%)<br/><span style="color:#8A96B5;font-size:10px">点击筛选</span>'}}),
+        legend:{bottom:0,textStyle:{color:document.documentElement.getAttribute('data-theme')==='light'?'#4a5568':'#8A96B5',fontSize:10},itemWidth:10,itemHeight:10,type:'scroll'},
+        graphic:[{type:'text',left:'center',top:'center',style:{text:'总计\n'+self.fmt(total),textAlign:'center',fill:document.documentElement.getAttribute('data-theme')==='light'?'#4a5568':'#D0D7E8',fontSize:14,lineHeight:20}}],
+        series:[{
+          type:'pie',radius:['45%','70%'],center:['50%','45%'],
+          label:{color:document.documentElement.getAttribute('data-theme')==='light'?'#4a5568':'#B0B8C9',fontSize:10,formatter:'{b}\n{d}%'},
+          labelLine:{lineStyle:{color:'#4A5568'}},
+          emphasis:{scaleSize:8,itemStyle:{shadowBlur:16,shadowColor:'rgba(0,0,0,0.5)'}},
+          itemStyle:{borderColor:document.documentElement.getAttribute('data-theme')==='light'?'#fff':'#0F1520',borderWidth:2},
+          data:names.map(function(n,i){return{name:n,value:vals[i],itemStyle:{color:colors[i%colors.length]},_orig:originals[i]}})
+        }]
+      });
+      /* #10 click drill */
+      chart.on('click',function(params){
+        if(params.name){
+          var origName=originals[params.dataIndex]||params.name;
+          self.filterState.bizTypes=[origName];
+          self.filterState.brands=[];
+          self.applyFilters();
+          self.renderFilterTags();
+          self.chartLinkFilter={type:'pie',domId:domId,name:origName,dataIndex:params.dataIndex};
+          self.highlightChart(chart,domId,'pie',params.dataIndex);
+          self.updateChartFilterLabels();
+        }
+      });
+      /* Click blank area to clear */
+      chart.getZr().off('click');
+      chart.getZr().on('click',function(params){
+        if(!params.target){
+          self.clearChartFilter(domId,null);
+        }
+      });
+    }catch(e){console.error('makePieChart error:',domId,e);document.getElementById(domId).innerHTML='<div class="chart-placeholder">图表加载失败</div>'}
+  },
+
+  makeBarChart: function(domId,dataItems,color,gradient,linkKey){
+    try{
+      var chart=this.getChart(domId);
+      if(!chart){document.getElementById(domId).innerHTML='<div class="chart-placeholder">图表加载失败</div>';return}
+      var self=this,names=dataItems.slice().reverse().map(function(d){return d[0].length>24?d[0].slice(0,22)+'...':d[0]});
+      var originals=dataItems.slice().reverse().map(function(d){return d[0]});
+      var vals=dataItems.slice().reverse().map(function(d){return d[1]});
+      chart.off('click');
+      chart.setOption({
+        tooltip:this.makeTooltip({trigger:'axis',axisPointer:{type:'shadow'},formatter:function(ps){return ps[0].name+'<br/>'+ps[0].marker+' '+self.fmt(ps[0].value)+'<br/><span style="color:#8A96B5;font-size:10px">点击筛选</span>'}}),
+        grid:{left:150,right:60,top:10,bottom:20},
+        xAxis:{type:'value',axisLabel:{color:document.documentElement.getAttribute('data-theme')==='light'?'#4a5568':'#8A96B5',fontSize:10},splitLine:{lineStyle:{type:'dashed',color:document.documentElement.getAttribute('data-theme')==='light'?'rgba(0,0,0,0.06)':'rgba(255,255,255,0.06)'}}},
+        yAxis:{type:'category',data:names,axisLabel:{color:document.documentElement.getAttribute('data-theme')==='light'?'#4a5568':'#8A96B5',fontSize:10,width:140,overflow:'truncate'},axisLine:{lineStyle:{color:document.documentElement.getAttribute('data-theme')==='light'?'#d1d5db':'#2A3448'}}},
+        series:[{
+          type:'bar',data:vals,barMaxWidth:40,
+          itemStyle:{color:gradient||color,borderRadius:[6,6,0,0],shadowBlur:8,shadowColor:gradient?('rgba('+(color==='#F59E0B'?'245,158,11':'59,130,246')+',0.3)'):'transparent'},
+          label:{show:true,position:'right',color:document.documentElement.getAttribute('data-theme')==='light'?'#4a5568':'#B0B8C9',fontSize:10,formatter:function(p){return self.fmt(p.value)}},
+          emphasis:{itemStyle:{shadowBlur:12,shadowColor:'rgba(0,0,0,0.4)'}}
+        }]
+      });
+      /* #10 click drill */
+      chart.on('click',function(params){
+        if(linkKey&&params.dataIndex!=null){
+          var idx=vals.length-1-params.dataIndex;
+          var origName=originals[params.dataIndex];
+          if(linkKey==='brands'){
+            self.filterState.brands=[origName];
+          }else if(linkKey==='repos'){
+            self.filterState.repos=[origName];
+          }else if(linkKey==='bizTypes'){
+            self.filterState.bizTypes=[origName];
+          }
+          self.applyFilters();
+          self.renderFilterTags();
+          self.chartLinkFilter={type:'bar',domId:domId,dataIndex:params.dataIndex};
+          self.highlightChart(chart,domId,'bar',params.dataIndex);
+          self.updateChartFilterLabels();
+        }
+      });
+      /* Click blank area to clear */
+      chart.getZr().off('click');
+      chart.getZr().on('click',function(params){
+        if(!params.target){
+          self.clearChartFilter(domId,null);
+        }
+      });
+    }catch(e){console.error('makeBarChart error:',domId,e);document.getElementById(domId).innerHTML='<div class="chart-placeholder">图表加载失败</div>'}
+  },
+
+  makeTrendChart: function(){
+    try{
+      var td=DATA._trend;
+      if(!td||!td.months||td.months.length<2){
+        document.getElementById('chartCard7').style.display='';
+        document.getElementById('chart7').innerHTML='<div class="chart-placeholder">暂无趋势数据，请检查数据源</div>';
+        return;
+      }
+      document.getElementById('chartCard7').style.display='';
+      var chart=this.getChart('chart7');
+      if(!chart){document.getElementById('chart7').innerHTML='<div class="chart-placeholder">图表加载失败</div>';return}
+      var self=this;
+      chart.setOption({
+        tooltip:this.makeTooltip({trigger:'axis',formatter:function(params){var h=params[0].axisValue+'<br/>';params.forEach(function(p){h+=p.marker+' '+p.seriesName+': '+self.fmt(p.value)+'<br/>'});return h}}),
+        legend:{data:['出库单数','出库件数','入库单数','入库件数'],textStyle:{color:document.documentElement.getAttribute('data-theme')==='light'?'#4a5568':'#8A96B5',fontSize:11},top:0},
+        grid:{left:60,right:80,top:40,bottom:td.months.length>6?55:30},
+        xAxis:{type:'category',data:td.months,axisLabel:{color:document.documentElement.getAttribute('data-theme')==='light'?'#4a5568':'#8A96B5',fontSize:10,rotate:td.months.length>6?45:0,interval:0}},
+        yAxis:[
+          {type:'value',name:'件数',nameTextStyle:{color:document.documentElement.getAttribute('data-theme')==='light'?'#4a5568':'#8A96B5',fontSize:10},axisLabel:{color:document.documentElement.getAttribute('data-theme')==='light'?'#4a5568':'#8A96B5',fontSize:10},splitLine:{lineStyle:{type:'dashed',color:document.documentElement.getAttribute('data-theme')==='light'?'rgba(0,0,0,0.06)':'rgba(255,255,255,0.06)'}}},
+          {type:'value',name:'单数',nameTextStyle:{color:document.documentElement.getAttribute('data-theme')==='light'?'#4a5568':'#8A96B5',fontSize:10},axisLabel:{color:document.documentElement.getAttribute('data-theme')==='light'?'#4a5568':'#8A96B5',fontSize:10},splitLine:{show:false}}
+        ],
+        series:[
+          {name:'出库件数',type:'bar',data:td.so_qty,barWidth:'40%',itemStyle:{color:this.outGradient(),borderRadius:[6,6,0,0],shadowBlur:8,shadowColor:'rgba(245,158,11,0.3)'},yAxisIndex:0},
+          {name:'入库件数',type:'bar',data:td.si_qty,barWidth:'40%',itemStyle:{color:this.inGradient(),borderRadius:[6,6,0,0],shadowBlur:8,shadowColor:'rgba(59,130,246,0.3)'},yAxisIndex:0},
+          {name:'出库单数',type:'line',data:td.so_nos,smooth:true,itemStyle:{color:'#F59E0B'},lineStyle:{width:2.5},symbol:'circle',symbolSize:7,yAxisIndex:1},
+          {name:'入库单数',type:'line',data:td.si_nos,smooth:true,itemStyle:{color:'#3B82F6'},lineStyle:{width:2.5},symbol:'diamond',symbolSize:7,yAxisIndex:1}
+        ]
+      });
+    }catch(e){console.error('makeTrendChart error:',e)}
+  },
+
+  renderCharts: function(){
+    try{
+      var self=this;
+      self.makeBarChart('chart1',DATA.soBrand10,'#F59E0B',self.outGradient(),'brands');
+      self.makeBarChart('chart2',DATA.siBrand10,'#3B82F6',self.inGradient(),'brands');
+      self.makePieChart('chart3',DATA.soTypes,['#F59E0B','#F97316','#FBBF24','#FDBA74','#FCD34D']);
+      self.makePieChart('chart4',DATA.siTypes,['#3B82F6','#6366F1','#818CF8','#60A5FA','#93C5FD']);
+      self.makeBarChart('chart5',DATA.soWh10,'#F97316',self.outGradient(),'repos');
+      self.makeBarChart('chart6',DATA.siWh10,'#6366F1',self.inGradient(),'repos');
+      self.makeTrendChart();
+      self.updateChartFilterLabels();
+    }catch(e){console.error('renderCharts error:',e)}
+  },
+
+  /* #10 chart highlight & filter labels */
+  clearAllHighlights: function(){
+    var self=this;
+    Object.keys(this.charts).forEach(function(id){
+      var c=self.charts[id];
+      if(c&&!c.isDisposed()){c.dispatchAction({type:'downplay'});c.dispatchAction({type:'highlight',seriesIndex:0})}
+    });
+  },
+
+  highlightChart: function(chart,domId,type,dataIndex){
+    try{
+      this.clearAllHighlights();
+      chart.dispatchAction({type:'downplay',seriesIndex:0});
+      chart.dispatchAction({type:'highlight',seriesIndex:0,dataIndex:dataIndex});
+    }catch(e){console.error('highlightChart error:',e)}
+  },
+
+  clearChartFilter: function(domId,filterKey){
+    this.clearAllHighlights();
+    if(filterKey){
+      this.filterState[filterKey]=[];
+      this.applyFilters();
+      this.renderFilterTags();
+    }
+    this.chartLinkFilter=null;
+    this.updateChartFilterLabels();
+  },
+
+  updateChartFilterLabels: function(){
+    var mapping={
+      'chart1':{key:'brands',text:'出库品牌筛选'},
+      'chart2':{key:'brands',text:'入库品牌筛选'},
+      'chart3':{key:'bizTypes',text:'出库类型筛选'},
+      'chart4':{key:'bizTypes',text:'入库类型筛选'},
+      'chart5':{key:'repos',text:'出库仓库筛选'},
+      'chart6':{key:'repos',text:'入库仓库筛选'}
+    };
+    var self=this;
+    Object.keys(mapping).forEach(function(domId){
+      var m=mapping[domId];
+      var labelEl=document.getElementById('cfl'+domId.replace('chart',''));
+      if(!labelEl)return;
+      var chart=domId==='chart1'||domId==='chart3'||domId==='chart5'?'out':(domId==='chart2'||domId==='chart4'||domId==='chart6'?'in':'mixed');
+      var activeVal='';
+      if(self.filterState[m.key]&&self.filterState[m.key].length>0){
+        activeVal=self.filterState[m.key][0];
+      }
+      if(activeVal){
+        labelEl.className='chart-filter-label active';
+        labelEl.innerHTML=self.escHtml(activeVal)+' <span class="cf-clear" onclick="event.stopPropagation();App.clearChartFilter(\''+domId+'\',\''+m.key+'\')">&times;</span>';
+      }else{
+        labelEl.className='chart-filter-label';
+        var isPie=domId==='chart3'||domId==='chart4';
+        labelEl.textContent=isPie?'点击扇区筛选':'点击柱体筛选';
+      }
+    });
+  },
+
+  clearChartHighlight: function(){this.chartLinkFilter=null;this.updateChartFilterLabels()},
+
+  /* ==== Filters ==== */
+  getUnique: function(idx){
+    var set={},arr=[];
+    this.allRecords.forEach(function(r){var v=r[idx];if(v&&!set[v]){set[v]=1;arr.push(v)}});
+    return arr.sort();
+  },
+
+  buildFilters: function(){
+    try{
+      var bizTypes=this.getUnique(12),shops=this.getUnique(11).filter(function(s){return s});
+      var brands=this.getUnique(5),repos=this.getUnique(2);
+      this.buildMs('msBiz',bizTypes,'bizTypes');
+      this.buildMs('msShop',shops,'shops');
+      this.buildMs('msBrand',brands,'brands');
+      this.buildMs('msRepo',repos,'repos');
+    }catch(e){console.error('buildFilters error:',e)}
+  },
+
+  buildMs: function(id,items,key){
+    var dd=document.getElementById(id+'-dd'),h='';
+    h+='<div class="ms-search"><input type="text" placeholder="搜索..." oninput="App.msSearch(\''+id+'\')"></div>';
+    h+='<div class="ms-actions"><a onclick="App.msSelectAll(\''+id+'\',\''+key+'\')">全选</a> <a onclick="App.msClearAll(\''+id+'\',\''+key+'\')">清空</a></div>';
+    items.forEach(function(item){
+      h+='<label><input type="checkbox" value="'+App.escHtml(item)+'" onchange="App.onMsChange(\''+id+'\',\''+key+'\')">'+App.escHtml(item)+'</label>';
+    });
+    h+='<div class="ms-no-result" id="'+id+'-noresult">无匹配结果</div>';
+    dd.innerHTML=h;
+  },
+
+  toggleMs: function(id){
+    var dd=document.getElementById(id+'-dd');
+    var trigger=document.getElementById(id).querySelector('.ms-trigger');
+    var isOpen=dd.classList.contains('open');
+    if(isOpen){
+      // Close: move back to original parent
+      dd.classList.remove('open','portal');
+      dd.style.left='';dd.style.top='';dd.style.minWidth='';
+      var origParent=document.getElementById(id);
+      if(dd.parentNode!==origParent) origParent.appendChild(dd);
+      // Clear search
+      var si=dd.querySelector('.ms-search input');
+      if(si){si.value='';App.msSearch(id)}
+    }else{
+      // Open: Portal mode — move to body with fixed positioning
+      dd.classList.add('open','portal');
+      var rect=trigger.getBoundingClientRect();
+      dd.style.left=rect.left+'px';
+      dd.style.top=(rect.bottom+4)+'px';
+      dd.style.minWidth=rect.width+'px';
+      if(dd.parentNode!==document.body) document.body.appendChild(dd);
+      // Focus search input
+      setTimeout(function(){
+        var si=dd.querySelector('.ms-search input');
+        if(si) si.focus();
+      },50);
+    }
+    var self=this;
+    setTimeout(function(){
+      var fn=function(e){
+        var el=document.getElementById(id);
+        if(!el.contains(e.target) && !dd.contains(e.target)){
+          dd.classList.remove('open','portal');
+          dd.style.left='';dd.style.top='';dd.style.minWidth='';
+          if(dd.parentNode!==el) el.appendChild(dd);
+          var si=dd.querySelector('.ms-search input');
+          if(si) si.value='';
+          document.removeEventListener('click',fn);
+        }
+      };
+      if(dd.classList.contains('open'))document.addEventListener('click',fn);
+    },10);
+  },
+
+  msSelectAll: function(id,key){
+    var cbs=document.getElementById(id+'-dd').querySelectorAll('input[type="checkbox"]');
+    cbs.forEach(function(cb){cb.checked=true});
+    this.onMsChange(id,key);
+  },
+  msClearAll: function(id,key){
+    var cbs=document.getElementById(id+'-dd').querySelectorAll('input[type="checkbox"]');
+    cbs.forEach(function(cb){cb.checked=false});
+    this.onMsChange(id,key);
+  },
+
+  msSearch: function(id){
+    var dd=document.getElementById(id+'-dd');
+    var q=dd.querySelector('.ms-search input').value.toLowerCase();
+    var labels=dd.querySelectorAll('label');
+    var hasVisible=false;
+    labels.forEach(function(lb){
+      var text=(lb.textContent||'').toLowerCase();
+      if(!q||text.indexOf(q)>=0){lb.classList.remove('hidden');hasVisible=true}
+      else{lb.classList.add('hidden')}
+    });
+    var nr=dd.querySelector('.ms-no-result');
+    if(nr)nr.style.display=hasVisible?'none':'block';
+  },
+
+  onMsChange: function(id,key){
+    var cbs=document.getElementById(id+'-dd').querySelectorAll('input[type="checkbox"]'),sel=[];
+    cbs.forEach(function(cb){if(cb.checked)sel.push(cb.value)});
+    this.filterState[key]=sel;
+    var trigger=document.getElementById(id).querySelector('.ms-trigger'),label=trigger.textContent.replace(/\(.*\)/,'');
+    if(sel.length===0)trigger.textContent=label+'(全部)';
+    else if(sel.length<=3)trigger.textContent=label+'('+sel.join(',')+')';
+    else trigger.textContent=label+'('+sel.length+'项)';
+    this.applyFilters();
+  },
+
+  resetFilters: function(){
+    this.filterState={bizTypes:[],shops:[],brands:[],repos:[],search:''};
+    this.chartLinkFilter=null;
+    document.getElementById('searchInput').value='';
+    ['msBiz','msShop','msBrand','msRepo'].forEach(function(id){
+      document.getElementById(id+'-dd').querySelectorAll('input[type="checkbox"]').forEach(function(cb){cb.checked=false});
+    });
+    ['msBiz','msShop','msBrand','msRepo'].forEach(function(id){
+      var t=document.getElementById(id).querySelector('.ms-trigger');
+      t.textContent=t.textContent.replace(/\(.*\)/,'(全部)');
+    });
+    document.querySelectorAll('.top5-item.active').forEach(function(item){item.classList.remove('active')});
+    // Clear all chart highlights
+    this.clearAllHighlights();
+    this.renderFilterTags();
+    this.applyFilters();
+    this.updateChartFilterLabels();
+  },
+
+  toggleFilters: function(){document.getElementById('filterRow').classList.toggle('collapsed')},
+
+  /* #10 Render filter tags */
+  renderFilterTags: function(){
+    var self=this,h='';
+    var allTags=[];
+    if(this.filterState.brands.length>0)allTags.push({key:'brands',label:'品牌',val:this.filterState.brands[0],cls:''});
+    if(this.filterState.bizTypes.length>0)allTags.push({key:'bizTypes',label:'业务类型',val:this.filterState.bizTypes[0],cls:''});
+    if(this.filterState.shops.length>0)allTags.push({key:'shops',label:'店铺',val:this.filterState.shops[0],cls:''});
+    if(this.filterState.repos.length>0)allTags.push({key:'repos',label:'仓库',val:this.filterState.repos[0],cls:''});
+    allTags.forEach(function(t){
+      h+='<span class="filter-tag'+t.cls+'">'+t.label+': '+self.escHtml(t.val)+' <span class="ft-close" onclick="event.stopPropagation();App.clearTag(\''+t.key+'\')">&times;</span></span>';
+    });
+    document.getElementById('filterTags').innerHTML=h;
+  },
+
+  clearTag: function(key){
+    this.filterState[key]=[];
+    this.chartLinkFilter=null;
+    document.querySelectorAll('.top5-item.active').forEach(function(item){item.classList.remove('active')});
+    ['msBiz','msShop','msBrand','msRepo'].forEach(function(id){
+      var cbs=document.getElementById(id+'-dd').querySelectorAll('input[type="checkbox"]');
+      cbs.forEach(function(cb){cb.checked=false});
+      var t=document.getElementById(id).querySelector('.ms-trigger');
+      t.textContent=t.textContent.replace(/\(.*\)/,'(全部)');
+    });
+    // Clear chart highlights
+    this.clearAllHighlights();
+    this.applyFilters();
+    this.renderFilterTags();
+    this.updateChartFilterLabels();
+  },
+
+  /* #11 Search all fields */
+  applyFilters: function(){
+    try{
+      var self=this;
+      var s=document.getElementById('searchInput').value.toLowerCase();
+      self.filtered=self.allRecords.filter(function(r){
+        if(s){
+          var match=false;
+          for(var i=0;i<r.length;i++){
+            if(i===13)continue;
+            var v=r[i];
+            if(v!=null&&String(v).toLowerCase().indexOf(s)>=0){match=true;break}
+          }
+          if(!match)return false;
+        }
+        if(self.filterState.bizTypes.length>0&&self.filterState.bizTypes.indexOf(r[12])<0)return false;
+        if(self.filterState.shops.length>0&&self.filterState.shops.indexOf(r[11])<0)return false;
+        if(self.filterState.brands.length>0&&self.filterState.brands.indexOf(r[5])<0)return false;
+        if(self.filterState.repos.length>0&&self.filterState.repos.indexOf(r[2])<0)return false;
+        return true;
+      });
+      if(self.sortCol>=0)self.doSort();
+      self.curPage=0;self.expandedRow=-1;
+      self.renderTable();
+      self.renderSummaryStats();
+      self.renderFilterTags();
+      self.saveState();
+      self.updateHash();
+    }catch(e){console.error('applyFilters error:',e)}
+  },
+
+  doSort: function(){
+    var ri=this.COL_MAP[this.sortCol];
+    if(ri<0)return;
+    var sd=this.sortDir;
+    this.filtered.sort(function(a,b){
+      var av=a[ri],bv=b[ri];
+      if(typeof av==='number'&&typeof bv==='number')return(av-bv)*sd;
+      return String(av||'').localeCompare(String(bv||''))*sd;
+    });
+  },
+
+  sortTable: function(col){
+    if(this.sortCol===col)this.sortDir=-this.sortDir;else{this.sortCol=col;this.sortDir=1}
+    this.doSort();
+    for(var i=0;i<13;i++){var el=document.getElementById('si'+i);if(el){el.textContent='';el.className='sort-icon'}}
+    var si=document.getElementById('si'+col);
+    if(si){si.textContent=this.sortDir===1?' \u25b2':' \u25bc';si.className='sort-icon active'}
+    this.curPage=0;this.expandedRow=-1;this.renderTable();this.saveState();
+  },
+
+  /* #13 Summary Stats */
+  renderSummaryStats: function(){
+    try{
+      var f=this.filtered,total=f.length,unouted=0,sumRate=0,abnormal=0,brandSet={},repoSet={};
+      f.forEach(function(r){
+        unouted+=r[9]||0;
+        sumRate+=r[10]||0;
+        if((r[10]||0)===0)abnormal++;
+        if(r[5])brandSet[r[5]]=1;
+        if(r[2])repoSet[r[2]]=1;
+      });
+      var avgRate=total>0?(sumRate/total).toFixed(1):'0.0';
+      var brandCount=Object.keys(brandSet).length;
+      var repoCount=Object.keys(repoSet).length;
+      document.getElementById('summaryStats').innerHTML=
+        '共 <span class="ss-val">'+this.fmt(total)+'</span> 条 / 未完结 <span class="ss-val">'+this.fmt(unouted)+'</span> 件 / 平均完成率 <span class="ss-val">'+avgRate+'%</span> / 异常 <span class="ss-warn">'+abnormal+'</span> 条 / 涉及 <span class="ss-val">'+brandCount+'</span> 品牌 / <span class="ss-val">'+repoCount+'</span> 仓库';
+      document.getElementById('abnormalCount').textContent=abnormal;
+      document.getElementById('doneCount').textContent=f.filter(function(r){return(r[10]||0)>=100}).length;
+      document.getElementById('normalCount').textContent=total-abnormal;
+    }catch(e){console.error('renderSummaryStats error:',e)}
+  },
+
+  renderTable: function(){
+    try{
+      var total=this.filtered.length;
+      document.getElementById('totalCount').textContent=total;
+      var start=this.curPage*this.pageSize,end=Math.min(start+this.pageSize,total);
+      var pageData=this.filtered.slice(start,end),h='';
+      var self=this;
+      pageData.forEach(function(r,pi){
+        var tp=r[1]==='出库'?'so':'si',rate=r[10];
+        var rc=rate>=80?'g':(rate===0?'r':(rate>=40?'y':'r'));
+        var rowClass='';
+        if(rate===0)rowClass=' class="row-danger"';
+        else if(rate>=100)rowClass=' class="row-ok"';
+        var idx=start+pi;
+        h+='<tr'+rowClass+' onclick="App.toggleRow('+idx+')" style="cursor:pointer">'+
+          '<td class="al">'+self.fmtDate(r[13])+'</td>'+
+          '<td class="al"><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px;background:'+(tp==='so'?'rgba(245,158,11,0.15)':'rgba(59,130,246,0.15)')+';color:'+(tp==='so'?'#F59E0B':'#60A5FA')+'">'+self.escHtml(r[1])+'</span></td>'+
+          '<td class="al">'+self.escHtml(r[12]||'')+'</td>'+
+          '<td class="al">'+self.escHtml(r[2])+'</td>'+
+          '<td class="al">'+self.escHtml(r[3])+'</td>'+
+          '<td class="al">'+self.escHtml(r[4])+'</td>'+
+          '<td class="al">'+self.escHtml(r[11]||'')+'</td>'+
+          '<td class="al">'+self.escHtml(r[5])+'</td>'+
+          '<td class="al" style="max-width:220px;overflow:hidden;text-overflow:ellipsis">'+self.escHtml(r[6])+'</td>'+
+          '<td class="al">'+self.escHtml(r[14]||'')+'</td>'+
+          '<td class="ar num '+tp+'">'+self.fmt(r[7])+'</td>'+
+          '<td class="ar num '+tp+'">'+self.fmt(r[9])+'</td>'+
+          '<td class="ac rate '+rc+'">'+self.fmtPct(rate)+'</td>'+
+        '</tr>'+
+        '<tr class="expand-row'+(self.expandedRow===idx?' show':'')+'"><td colspan="13"><div class="expand-panel">'+
+          '<div class="ep-item"><span class="ep-label">申请时间</span><span class="ep-val">'+self.fmtDate(r[13])+'</span></div>'+
+          '<div class="ep-item"><span class="ep-label">申请数量</span><span class="ep-val">'+self.fmt(r[7])+'</span></div>'+
+          '<div class="ep-item"><span class="ep-label">单据类型</span><span class="ep-val">'+self.escHtml(r[1])+'</span></div>'+
+          '<div class="ep-item"><span class="ep-label">未完结数量</span><span class="ep-val">'+self.fmt(r[9])+'</span></div>'+
+          '<div class="ep-item"><span class="ep-label">业务类型</span><span class="ep-val">'+self.escHtml(r[12]||'')+'</span></div>'+
+          '<div class="ep-item"><span class="ep-label">已完成数量</span><span class="ep-val">'+self.fmt(r[8]||0)+'</span></div>'+
+          '<div class="ep-item"><span class="ep-label">仓库</span><span class="ep-val">'+self.escHtml(r[2])+'</span></div>'+
+          '<div class="ep-item"><span class="ep-label">完结率</span><span class="ep-val">'+self.fmtPct(rate)+'</span></div>'+
+          '<div class="ep-item"><span class="ep-label">单号</span><span class="ep-val">'+self.escHtml(r[3])+'</span></div>'+
+          '<div class="ep-item"><span class="ep-label">商品条码</span><span class="ep-val">'+self.escHtml(r[14]||'')+'</span></div>'+
+          '<div class="ep-item"><span class="ep-label">关联单号</span><span class="ep-val">'+self.escHtml(r[4])+'</span></div>'+
+        '</div></td></tr>';
+      });
+      document.getElementById('tableBody').innerHTML=h;
+      /* #16 Pagination */
+      var tp=Math.ceil(total/this.pageSize),ph='';
+      ph+='<span class="page-info">第 '+(start+1)+'-'+end+' 条 / 共 '+total+' 条</span>';
+      ph+='<button '+(this.curPage===0?'disabled':'')+' onclick="App.goPage(0)">首页</button>';
+      ph+='<button '+(this.curPage===0?'disabled':'')+' onclick="App.goPage('+(this.curPage-1)+')">上一页</button>';
+      // Page number buttons with ellipsis
+      var maxShow=7;
+      if(tp<=maxShow+2){
+        for(var i=0;i<tp;i++)ph+='<button '+(i===this.curPage?'style="background:#4A90E2;color:#fff"':'')+' onclick="App.goPage('+i+')">'+(i+1)+'</button>';
+      }else{
+        var pages=[];
+        pages.push(0);
+        if(this.curPage>3)pages.push('...');
+        for(var p=Math.max(1,this.curPage-2);p<=Math.min(tp-2,this.curPage+2);p++)pages.push(p);
+        if(this.curPage<tp-4)pages.push('...');
+        pages.push(tp-1);
+        pages.forEach(function(p){
+          if(p==='...')ph+='<span class="ellipsis">...</span>';
+          else ph+='<button '+(p===self.curPage?'style="background:#4A90E2;color:#fff"':'')+' onclick="App.goPage('+p+')">'+(p+1)+'</button>';
+        });
+      }
+      ph+='<button '+(this.curPage>=tp-1?'disabled':'')+' onclick="App.goPage('+(this.curPage+1)+')">下一页</button>';
+      ph+='<button '+(this.curPage>=tp-1?'disabled':'')+' onclick="App.goPage('+(tp-1)+')">末页</button>';
+      ph+=' <span style="color:var(--text-muted);font-size:12px">每页</span> <select onchange="App.changePageSize(this.value)">'+
+        '<option value="10"'+((self.pageSize||50)==10?' selected':'')+'>10</option>'+
+        '<option value="25"'+((self.pageSize||50)==25?' selected':'')+'>25</option>'+
+        '<option value="50"'+((self.pageSize||50)==50?' selected':'')+'>50</option>'+
+        '<option value="100"'+((self.pageSize||50)==100?' selected':'')+'>100</option>'+
+        '<option value="'+total+'"'+((self.pageSize||50)>=total?' selected':'')+'>全部</option>'+
+        '</select> <span style="color:var(--text-muted);font-size:12px">条</span>';
+      ph+=' <span style="color:var(--text-muted);font-size:12px">跳至</span> <input type="number" min="1" max="'+tp+'" value="'+(this.curPage+1)+'" onkeydown="if(event.key===\'Enter\')App.goPage(parseInt(this.value)-1)" style="width:50px"> <span style="color:var(--text-muted);font-size:12px">页</span>';
+      document.getElementById('pagination').innerHTML=ph;
+    }catch(e){console.error('renderTable error:',e)}
+  },
+
+  /* #12 Row expand */
+  toggleRow: function(idx){
+    this.expandedRow=this.expandedRow===idx?-1:idx;
+    this.renderTable();
+  },
+
+  changePageSize: function(val){
+    var v=parseInt(val);this.pageSize=v;this.curPage=0;
+    localStorage.setItem('b-monitor-pageSize',v);
+    this.renderTable();this.saveState();
+  },
+
+  goPage: function(p){
+    this.curPage=Math.max(0,Math.min(p,Math.ceil(this.filtered.length/this.pageSize)-1));
+    this.expandedRow=-1;this.renderTable();this.saveState();
+  },
+
+  /* #13 Keyboard shortcuts */
+  handleKeyboard: function(e){
+    if(e.ctrlKey&&e.key==='f'){e.preventDefault();document.getElementById('searchInput').focus();return}
+    if(e.key==='Escape'){
+      document.querySelectorAll('.ms-dropdown.open').forEach(function(dd){dd.classList.remove('open')});
+      var cp=document.getElementById('colPanel');if(cp)cp.classList.remove('open');
+      if(document.activeElement===document.getElementById('searchInput'))document.getElementById('searchInput').blur();
+    }
+  },
+
+  /* #14 Toast */
+  showToast: function(msg){
+    var el=document.createElement('div');el.className='toast';el.textContent=msg;document.body.appendChild(el);
+    setTimeout(function(){el.classList.add('fadeout');setTimeout(function(){if(el.parentNode)el.parentNode.removeChild(el)},400)},2000);
+  },
+
+  /* CSV Export */
+  exportCSV: function(){
+    try{
+      var self=this;
+      var headers=['申请时间','单据类型','业务类型','仓库','单号','关联单号','店铺','品牌','货品','商品条码','申请数量','未完结数量','完结率'];
+      var rows=[headers.join(',')];
+      this.filtered.forEach(function(r){
+        rows.push([self.fmtDate(r[13]),r[1],r[12]||'',r[2],r[3],r[4],'"'+(r[11]||'').replace(/"/g,'""')+'"',r[5],'"'+(r[6]||'').replace(/"/g,'""')+'"','"'+(r[14]||'').replace(/"/g,'""')+'"',r[7],r[9],self.fmtPct(r[10])].join(','));
+      });
+      var blob=new Blob(['\uFEFF'+rows.join('\n')],{type:'text/csv;charset=utf-8;'});
+      var a=document.createElement('a');a.href=URL.createObjectURL(blob);
+      a.download='吉客云B单未完结监控_'+new Date().toISOString().slice(0,10)+'.csv';
+      a.click();URL.revokeObjectURL(a.href);
+      this.showToast('已导出 '+this.filtered.length+' 条记录到 CSV 文件');
+    }catch(e){console.error('exportCSV error:',e)}
+  },
+
+  /* #19 Fullscreen */
+  toggleFullscreen: function(){
+    if(document.fullscreenElement||document.webkitFullscreenElement){
+      if(document.exitFullscreen)document.exitFullscreen();
+      else if(document.webkitExitFullscreen)document.webkitExitFullscreen();
+    }else{
+      var el=document.documentElement;
+      if(el.requestFullscreen)el.requestFullscreen();
+      else if(el.webkitRequestFullscreen)el.webkitRequestFullscreen();
+    }
+  },
+
+  /* #21 Theme toggle */
+  toggleTheme: function(){
+    var html=document.documentElement,isDark=html.getAttribute('data-theme')==='dark';
+    html.setAttribute('data-theme',isDark?'light':'dark');
+    document.getElementById('themeBtn').textContent=isDark?'\u2600\ufe0f':'\ud83c\udf19';
+    localStorage.setItem('b-monitor-theme',isDark?'light':'dark');
+    // Re-render charts with new theme
+    var self=this;
+    Object.keys(this.charts).forEach(function(id){
+      var inst=self.charts[id];if(inst&&!inst.isDisposed())inst.dispose();
+    });
+    this.charts={};
+    setTimeout(function(){self.renderCharts()},150);
+  },
+
+  /* #19 Column visibility */
+  buildColPanel: function(){
+    var self=this,h='';
+    var saved=null;
+    try{saved=JSON.parse(localStorage.getItem('b-monitor-columns')||'null')}catch(e){}
+    this.COL_NAMES.forEach(function(name,i){
+      var locked=i>=self.COL_NAMES.length-3;
+      var checked=saved?saved[i]!==false:true;
+      h+='<label'+'><input type="checkbox" data-col="'+i+'" '+(checked?'checked':'')+(locked?' disabled':'')+' onchange="App.toggleCol('+i+')">'+name+'</label>';
+    });
+    document.getElementById('colPanelChecks').innerHTML=h;
+  },
+  toggleColPanel: function(){
+    document.getElementById('colPanel').classList.toggle('open');
+  },
+  toggleCol: function(i){
+    this.saveColVisibility();
+    this.renderTable();
+  },
+  saveColVisibility: function(){
+    var cbs=document.getElementById('colPanelChecks').querySelectorAll('input[type="checkbox"]');
+    var state=[];
+    cbs.forEach(function(cb){state.push(cb.checked)});
+    localStorage.setItem('b-monitor-columns',JSON.stringify(state));
+  },
+
+  /* #18 Alert banner */
+  showAbnormalRows: function(){
+    this.filterState={bizTypes:[],shops:[],brands:[],repos:[],search:''};
+    document.getElementById('searchInput').value='';
+    this.applyFilters();
+    this.renderFilterTags();
+    // Filter to show only abnormal rows visible - scroll to table
+    document.querySelector('.table-section').scrollIntoView({behavior:'smooth'});
+  },
+  dismissAlert: function(){
+    document.getElementById('alertBanner').classList.remove('show');
+    sessionStorage.setItem('b-monitor-alert-dismissed','1');
+  },
+
+  /* #20 Share link */
+  updateHash: function(){
+    try{
+      var params=[];
+      if(this.filterState.brands.length>0)params.push('brands='+encodeURIComponent(this.filterState.brands.join(',')));
+      if(this.filterState.bizTypes.length>0)params.push('bizTypes='+encodeURIComponent(this.filterState.bizTypes.join(',')));
+      if(this.filterState.shops.length>0)params.push('shops='+encodeURIComponent(this.filterState.shops.join(',')));
+      if(this.filterState.repos.length>0)params.push('repos='+encodeURIComponent(this.filterState.repos.join(',')));
+      var hash=params.length>0?'#'+params.join('&'):'';
+      if(window.location.hash!==hash)history.replaceState(null,'',hash||' ');
+    }catch(e){}
+  },
+  restoreFromHash: function(){
+    try{
+      var hash=window.location.hash.slice(1);
+      if(!hash)return;
+      var changed=false;
+      hash.split('&').forEach(function(p){
+        var kv=p.split('=');
+        if(kv.length===2&&kv[1]){
+          var key=kv[0],vals=kv[1].split(',').map(decodeURIComponent);
+          if(['brands','bizTypes','shops','repos'].indexOf(key)>=0){
+            this.filterState[key]=vals;changed=true;
+          }
+        }
+      },this);
+      if(changed){this.applyFilters();this.renderFilterTags()}
+    }catch(e){}
+  },
+  copyShareLink: function(){
+    var url=window.location.href;
+    navigator.clipboard.writeText(url).then(function(){
+      App.showToast('链接已复制');
+    }).catch(function(){
+      App.showToast('复制失败，请手动复制地址栏链接');
+    });
+  }
+};
+
+document.addEventListener('DOMContentLoaded',function(){
+  document.getElementById('searchInput').addEventListener('input',function(){App.filterState.search=this.value;App.applyFilters()});
+  // Back to top button
+  var btt=document.getElementById('backToTop');
+  window.addEventListener('scroll',function(){
+    if(window.scrollY>500)btt.classList.add('visible');
+    else btt.classList.remove('visible');
+  });
+  App.init();
+});
+})();
+</script>
+</body>
+</html>

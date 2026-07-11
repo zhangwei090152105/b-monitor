@@ -2,10 +2,10 @@
 """
 吉客云 B 单未完结监控 - GitHub Actions 适配版
 
-整合了 API 拉取 → Excel 生成 → 邮件发送 → 企微推送 四个阶段的完整流水线。
+整合了 API 拉取 → Excel 生成 → 邮件发送 → 企微推送 → 看板 HTML 五个阶段的完整流水线。
 所有敏感信息从环境变量读取，无硬编码，可在 GitHub Actions 中独立运行。
 
-⚠️ 妙搭看板更新不在本脚本范围内，需配合 GitHub Pages 或单独部署。
+看板使用 v2.0 精装修模板（ECharts图表、暗色/亮色主题、玻璃拟态、筛选搜索、分页表格）。
 
 用法:
     # 完整流水线（使用当天日期）
@@ -65,6 +65,17 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR = os.path.join(SCRIPT_DIR, 'output')
 os.makedirs(OUT_DIR, exist_ok=True)
 
+# 模板文件路径（v2.0 精装修模板前段/后段，不含 DATA 数据）
+TEMPLATE_DIR = os.path.join(SCRIPT_DIR, 'templates')
+TEMPLATE_BEFORE_PATH = os.environ.get(
+    'TEMPLATE_BEFORE_PATH',
+    os.path.join(TEMPLATE_DIR, 'template_before.txt')
+)
+TEMPLATE_AFTER_PATH = os.environ.get(
+    'TEMPLATE_AFTER_PATH',
+    os.path.join(TEMPLATE_DIR, 'template_after.txt')
+)
+
 # ============================================================
 # 阶段 1: API 调用层
 # ============================================================
@@ -86,12 +97,14 @@ STOCKIN_COLS = (
     'logisticNo,logisticName'
 )
 
+
 def md5_sign(params):
     """签名：APPSECRET + 按字母排序的(k+v) + APPSECRET，md5 小写"""
     items = {k: v for k, v in params.items() if k not in ('sign', 'contextid')}
     sorted_str = ''.join(f'{k}{v}' for k, v in sorted(items.items()))
     signed = JKY_APPSECRET + sorted_str + JKY_APPSECRET
     return hashlib.md5(signed.lower().encode('utf-8')).hexdigest()
+
 
 def call_api(method, bizcontent, max_retry=3):
     """通用 API 调用（带重试 3 次，间隔 2s）"""
@@ -115,6 +128,7 @@ def call_api(method, bizcontent, max_retry=3):
             time.sleep(2)
     return {'code': -1, 'msg': f'调用失败 {max_retry} 次'}
 
+
 def _month_ranges():
     """生成 2026-01 到当前月的逐月日期范围"""
     ranges = []
@@ -132,6 +146,7 @@ def _month_ranges():
             to_d = f'{y}-{m:02d}-{end_day}'
             ranges.append((from_d, to_d))
     return ranges
+
 
 def fetch_stockout(page_size=100, max_total_seconds=600):
     """拉全部出库申请单（未完结 outStatus in 1,2），过滤 status=3"""
@@ -186,6 +201,7 @@ def fetch_stockout(page_size=100, max_total_seconds=600):
             break
     print(f'  [出库] 总计 {len(all_data)} 条, {total_pages} 页 (去重+过滤后)')
     return all_data
+
 
 def fetch_stockin(page_size=100, max_total_seconds=600):
     """拉全部入库申请单（未完结 inStatus in 1,2），过滤 status=3 + inType=105"""
@@ -243,6 +259,7 @@ def fetch_stockin(page_size=100, max_total_seconds=600):
     print(f'  [入库] 总计 {len(all_data)} 条, {total_pages} 页 (去重+过滤后)')
     return all_data
 
+
 def fetch_brand_map(sku_barcodes):
     """按 skuBarcode 批量反查 brandName"""
     barcode_to_brand = {}
@@ -264,12 +281,14 @@ def fetch_brand_map(sku_barcodes):
         print(f'  [货品反查] 批次 {i//20+1}: {len(batch)} 条 → 命中 {len(goods_list)}')
     return barcode_to_brand
 
+
 def save_json(data, prefix):
     """落盘到 output/"""
     path = os.path.join(OUT_DIR, f'{prefix}_{B_MONITOR_DATE}.json')
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     print(f'  [保存] {path} ({len(data)} 条)')
+
 
 # ============================================================
 # 阶段 2: Excel 生成
@@ -280,6 +299,7 @@ def get_status_name(status, biz_type='out'):
         return {0: '待递交', 1: '审核中', 2: '审核通过', 3: '关闭', 4: '作废'}.get(status, str(status))
     else:
         return {0: '待递交', 1: '待审核', 2: '已审核', 3: '已关闭', 10: '审核中'}.get(status, str(status))
+
 
 def build_summary(data, group_keys, prefix='out'):
     groups = {}
@@ -294,6 +314,7 @@ def build_summary(data, group_keys, prefix='out'):
         groups[key]['total_remain'] += float(
             x.get('totalUnoutedCount' if prefix == 'out' else 'totalUninnerCount') or 0)
     return groups
+
 
 def write_summary_sheet(ws, groups, label_prefix='出库'):
     if label_prefix == '出库':
@@ -322,6 +343,7 @@ def write_summary_sheet(ws, groups, label_prefix='出库'):
 
     for col_idx in range(1, len(headers) + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = 18
+
 
 def write_detail_sheet(ws, data, biz_type='out'):
     if biz_type == 'out':
@@ -409,6 +431,7 @@ def write_detail_sheet(ws, data, biz_type='out'):
         ws.column_dimensions[get_column_letter(col_idx)].width = 18
     ws.freeze_panes = 'A2'
 
+
 def generate_excel(stockout, stockin):
     """生成 4 sheet Excel，返回文件路径"""
     wb = openpyxl.Workbook()
@@ -438,12 +461,14 @@ def generate_excel(stockout, stockin):
     print(f'✅ Excel 生成成功: {out_path} ({size_kb:.0f} KB)')
     return out_path
 
+
 # ============================================================
 # 阶段 3: 邮件发送
 # ============================================================
 
 def _safe_int(n):
     return n if n is None else int(n)
+
 
 def send_email(excel_path, stockout, stockin):
     """发送 HTML 正文邮件 + Excel 附件"""
@@ -538,6 +563,7 @@ def send_email(excel_path, stockout, stockin):
 
     print(f'✅ 邮件发送成功 → {TO_ADDR}' + (f' (抄送 {CC_ADDR})' if CC_ADDR else ''))
 
+
 # ============================================================
 # 阶段 4: 企微推送
 # ============================================================
@@ -606,142 +632,294 @@ def send_wecom(stockout, stockin):
         except Exception as e:
             print(f'❌ 企微推送异常: {e}')
 
+
 # ============================================================
-# 主流程
+# 阶段 5: 看板 HTML 生成（v2.0 精装修模板）
 # ============================================================
+
+def _fmt_date_str(ts_ms):
+    """将毫秒时间戳格式化为 'YYYY-MM-DD HH:MM' 字符串"""
+    if not ts_ms:
+        return ''
+    try:
+        dt = datetime.fromtimestamp(int(ts_ms) / 1000)
+        return dt.strftime('%Y-%m-%d %H:%M')
+    except (OSError, ValueError, TypeError):
+        return ''
+
+
+def _fmt_number(n):
+    """格式化为带千分位的字符串"""
+    if n is None:
+        return '0'
+    return f'{int(n):,}'
+
+
+def _build_record_from_stockout(x):
+    """从出库 API 数据构建一条 records 数组（15 个元素）"""
+    ts = x.get('applyDate', 0) or 0
+    date_str = _fmt_date_str(ts)
+    sku_count = int(x.get('skuCount') or 0)
+    outed_count = int(x.get('outedCount') or 0)
+    unouted_count = int(x.get('unOutedCount') or 0)
+    rate = round((outed_count / sku_count * 100) if sku_count > 0 else 0, 1)
+    return [
+        date_str,                              # [0]  日期字符串
+        '出库',                                 # [1]  单据类型
+        x.get('outWarehouseName', '') or '',    # [2]  仓库
+        x.get('outNo', '') or '',               # [3]  单号
+        x.get('relDataId') or '',               # [4]  关联单号
+        x.get('brandName', '') or '',           # [5]  品牌
+        x.get('goodsName', '') or '',           # [6]  货品名称
+        sku_count,                              # [7]  申请数量
+        outed_count,                            # [8]  已出库数量
+        unouted_count,                          # [9]  未出库数量
+        rate,                                   # [10] 完成率
+        x.get('field1') or '',                  # [11] 店铺
+        x.get('outTypeName', '') or '',         # [12] 业务类型
+        int(ts),                                # [13] 时间戳(ms)
+        x.get('skuBarcode', '') or '',          # [14] 条码
+    ]
+
+
+def _build_record_from_stockin(x):
+    """从入库 API 数据构建一条 records 数组（15 个元素）"""
+    ts = x.get('applyDate', 0) or 0
+    date_str = _fmt_date_str(ts)
+    sku_count = int(x.get('skuCount') or 0)
+    inner_count = int(x.get('innerCount') or 0)
+    uninner_count = int(x.get('uninnerCount') or 0)
+    rate = round((inner_count / sku_count * 100) if sku_count > 0 else 0, 1)
+    return [
+        date_str,                               # [0]  日期字符串
+        '入库',                                  # [1]  单据类型
+        x.get('inWarehouseName', '') or '',      # [2]  仓库
+        x.get('inNo', '') or '',                 # [3]  单号
+        x.get('relDataId') or '',                # [4]  关联单号
+        x.get('brandName', '') or '',            # [5]  品牌
+        x.get('goodsName', '') or '',            # [6]  货品名称
+        sku_count,                               # [7]  申请数量
+        inner_count,                             # [8]  已入库数量
+        uninner_count,                           # [9]  未入库数量
+        rate,                                    # [10] 完成率
+        x.get('field1') or '',                   # [11] 店铺
+        x.get('inTypeName', '') or '',           # [12] 业务类型
+        int(ts),                                 # [13] 时间戳(ms)
+        x.get('skuBarcode', '') or '',           # [14] 条码
+    ]
+
+
+def _top_n_by(records, key_fn, value_fn, n=5):
+    """按 value_fn 降序排列取 Top N，返回 [(key, count, value), ...]"""
+    agg = defaultdict(lambda: {'count': 0, 'value': 0.0})
+    for r in records:
+        k = key_fn(r)
+        agg[k]['count'] += 1
+        agg[k]['value'] += value_fn(r)
+    sorted_items = sorted(agg.items(), key=lambda kv: kv[1]['value'], reverse=True)[:n]
+    return [[k, d['count'], int(d['value'])] for k, d in sorted_items]
+
+
+def _top_n_simple(records, key_fn, n=10):
+    """按 count 降序排列取 Top N，返回 [[key, count], ...]"""
+    agg = defaultdict(int)
+    for r in records:
+        k = key_fn(r)
+        agg[k] += 1
+    sorted_items = sorted(agg.items(), key=lambda kv: kv[1], reverse=True)[:n]
+    return [[k, v] for k, v in sorted_items]
+
+
+def _build_trend(so_records, si_records):
+    """构建月度趋势数据 _trend"""
+    from collections import OrderedDict
+
+    # 收集所有月份
+    month_set = set()
+    for r in so_records:
+        ts = r[13]
+        if ts:
+            try:
+                m = datetime.fromtimestamp(ts / 1000).strftime('%Y-%m')
+                month_set.add(m)
+            except (OSError, ValueError, TypeError):
+                pass
+    for r in si_records:
+        ts = r[13]
+        if ts:
+            try:
+                m = datetime.fromtimestamp(ts / 1000).strftime('%Y-%m')
+                month_set.add(m)
+            except (OSError, ValueError, TypeError):
+                pass
+
+    months = sorted(month_set)
+    if not months:
+        return None
+
+    # 初始化月度计数
+    so_nos = [0] * len(months)
+    so_qty = [0] * len(months)
+    si_nos = [0] * len(months)
+    si_qty = [0] * len(months)
+    month_idx = {m: i for i, m in enumerate(months)}
+
+    for r in so_records:
+        ts = r[13]
+        if ts:
+            try:
+                m = datetime.fromtimestamp(ts / 1000).strftime('%Y-%m')
+                if m in month_idx:
+                    idx = month_idx[m]
+                    so_nos[idx] += 1
+                    so_qty[idx] += r[9]  # unouted count
+            except (OSError, ValueError, TypeError):
+                pass
+
+    for r in si_records:
+        ts = r[13]
+        if ts:
+            try:
+                m = datetime.fromtimestamp(ts / 1000).strftime('%Y-%m')
+                if m in month_idx:
+                    idx = month_idx[m]
+                    si_nos[idx] += 1
+                    si_qty[idx] += r[9]  # uninner count
+            except (OSError, ValueError, TypeError):
+                pass
+
+    return {
+        'months': months,
+        'so_nos': so_nos,
+        'so_qty': so_qty,
+        'si_nos': si_nos,
+        'si_qty': si_qty,
+    }
 
 
 def generate_dashboard_html(stockout, stockin):
-    """生成 GitHub Pages 看板 index.html"""
-    import os
+    """
+    生成 v2.0 精装修看板 index.html（模板拼接方式）。
 
-    so_cnt = len(stockout)
-    so_total = sum(float(x.get('totalSkuCount') or 0) for x in stockout)
-    so_remain = sum(float(x.get('totalUnoutedCount') or 0) for x in stockout)
-    so_rate = (so_total - so_remain) / so_total * 100 if so_total > 0 else 0
+    使用 template_before.txt + var DATA = {...} + template_after.txt
+    三段拼接生成完整的看板 HTML。
+    """
+    # ---- 1. 读模板文件 ----
+    if not os.path.exists(TEMPLATE_BEFORE_PATH):
+        raise FileNotFoundError(f'模板文件不存在: {TEMPLATE_BEFORE_PATH}')
+    if not os.path.exists(TEMPLATE_AFTER_PATH):
+        raise FileNotFoundError(f'模板文件不存在: {TEMPLATE_AFTER_PATH}')
 
-    si_cnt = len(stockin)
-    si_total = sum(float(x.get('totalSkuCount') or 0) for x in stockin)
-    si_remain = sum(float(x.get('totalUninnerCount') or 0) for x in stockin)
-    si_rate = (si_total - si_remain) / si_total * 100 if si_total > 0 else 0
+    with open(TEMPLATE_BEFORE_PATH, 'r', encoding='utf-8') as f:
+        template_before = f.read()
 
-    # 出库 Top 5
-    from collections import defaultdict
-    so_agg = defaultdict(lambda: {'count': 0, 'remain': 0.0})
-    for x in stockout:
-        brand = x.get('brandName', '未知')
-        tp = x.get('outTypeName', '')
-        key = f'{brand}·{tp}'
-        so_agg[key]['count'] += 1
-        so_agg[key]['remain'] += float(x.get('totalUnoutedCount') or 0)
-    so_top5 = sorted(so_agg.items(), key=lambda kv: kv[1]['remain'], reverse=True)[:5]
+    with open(TEMPLATE_AFTER_PATH, 'r', encoding='utf-8') as f:
+        template_after = f.read()
 
-    # 入库 Top 5
-    si_agg = defaultdict(lambda: {'count': 0, 'remain': 0.0})
-    for x in stockin:
-        brand = x.get('brandName', '未知')
-        tp = x.get('inTypeName', '')
-        key = f'{brand}·{tp}'
-        si_agg[key]['count'] += 1
-        si_agg[key]['remain'] += float(x.get('totalUninnerCount') or 0)
-    si_top5 = sorted(si_agg.items(), key=lambda kv: kv[1]['remain'], reverse=True)[:5]
+    # ---- 2. 构建 records（出库 + 入库统一格式） ----
+    so_records = [_build_record_from_stockout(x) for x in stockout]
+    si_records = [_build_record_from_stockin(x) for x in stockin]
+    all_records = so_records + si_records
 
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # ---- 3. 计算 KPI 汇总 ----
+    so_nos = len(so_records)
+    so_total_qty = sum(r[7] for r in so_records)
+    so_unouted = sum(r[9] for r in so_records)
+    so_rate = round((so_total_qty - so_unouted) / so_total_qty * 100, 1) if so_total_qty > 0 else 0.0
 
-    # --- 构建 HTML ---
-    html = f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>吉客云 B 单未完结监控</title>
-<style>
-* {{ margin:0; padding:0; box-sizing:border-box; }}
-body {{ font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif; background:#f0f2f5; padding:20px; color:#333; }}
-.header {{ background:linear-gradient(135deg, #1F4E78, #2B6BAE); color:white; padding:24px 30px; border-radius:10px; margin-bottom:20px; }}
-.header h1 {{ font-size:22px; margin-bottom:8px; }}
-.header .info {{ font-size:13px; opacity:0.85; }}
-.card {{ background:white; border-radius:10px; padding:24px; margin-bottom:20px; box-shadow:0 2px 8px rgba(0,0,0,0.08); }}
-.card h2 {{ font-size:16px; margin-bottom:16px; color:#1F4E78; border-bottom:2px solid #e8e8e8; padding-bottom:10px; }}
-table {{ width:100%; border-collapse:collapse; font-size:14px; }}
-th {{ background:#F5F7FA; padding:10px 12px; text-align:center; font-weight:600; border-bottom:2px solid #e8e8e8; }}
-td {{ padding:10px 12px; text-align:center; border-bottom:1px solid #f0f0f0; }}
-.rate-green {{ color:#52c41a; font-weight:bold; }}
-.rate-red {{ color:#f5222d; font-weight:bold; }}
-.badge {{ display:inline-block; padding:2px 8px; border-radius:4px; font-size:12px; }}
-.badge-out {{ background:#fff2e8; color:#d46b08; }}
-.badge-in {{ background:#e6f7ff; color:#096dd9; }}
-.footer {{ text-align:center; color:#999; font-size:12px; padding:20px; }}
-</style>
-</head>
-<body>
-<div class="header">
-  <h1>吉客云 B 单未完结监控</h1>
-  <div class="info">数据日期: {B_MONITOR_DATE} · 刷新时间: {now_str} · 由 GitHub Actions 自动生成</div>
-</div>
+    si_nos = len(si_records)
+    si_total_qty = sum(r[7] for r in si_records)
+    si_uninner = sum(r[9] for r in si_records)
+    si_rate = round((si_total_qty - si_uninner) / si_total_qty * 100, 1) if si_total_qty > 0 else 0.0
 
-<div class="card">
-  <h2>核对统计</h2>
-  <table>
-    <tr><th>业务类型</th><th>单数</th><th>申请数量</th><th>未完结数</th><th>完结率</th></tr>
-    <tr>
-      <td><span class="badge badge-out">出库申请</span></td>
-      <td>{so_cnt:,}</td>
-      <td>{int(so_total):,}</td>
-      <td style="color:#d46b08;font-weight:bold;">{int(so_remain):,}</td>
-      <td class="{'rate-green' if so_rate > 50 else 'rate-red'}">{so_rate:.1f}%</td>
-    </tr>
-    <tr>
-      <td><span class="badge badge-in">入库申请</span></td>
-      <td>{si_cnt:,}</td>
-      <td>{int(si_total):,}</td>
-      <td style="color:#d46b08;font-weight:bold;">{int(si_remain):,}</td>
-      <td class="{'rate-green' if si_rate > 50 else 'rate-red'}">{si_rate:.1f}%</td>
-    </tr>
-    <tr style="background:#F5F7FA;font-weight:bold;">
-      <td>合计</td>
-      <td>{so_cnt + si_cnt:,}</td>
-      <td>{int(so_total + si_total):,}</td>
-      <td style="color:#f5222d;">{int(so_remain + si_remain):,}</td>
-      <td>-</td>
-    </tr>
-  </table>
-</div>
+    # ---- 4. Top 5 / Top 10 / 分类统计 ----
+    # soTop5: 按品牌聚合，按未出库数量降序 Top 5
+    so_top5 = _top_n_by(so_records,
+                        key_fn=lambda r: r[5],      # brand
+                        value_fn=lambda r: r[9],     # unouted count
+                        n=5)
 
-<div class="card">
-  <h2>出库 Top 5（按待出件数）</h2>
-  <table>
-    <tr><th>#</th><th>品牌 · 业务类型</th><th>单数</th><th>待出件数</th></tr>
-"""
-    for i, (key, d) in enumerate(so_top5, 1):
-        html += f'    <tr><td>{i}</td><td>{key}</td><td>{d["count"]}</td><td style="color:#d46b08;font-weight:bold;">{int(d["remain"]):,}</td></tr>\n'
+    si_top5 = _top_n_by(si_records,
+                        key_fn=lambda r: r[5],
+                        value_fn=lambda r: r[9],
+                        n=5)
 
-    html += """  </table>
-</div>
+    so_brand10 = _top_n_simple(so_records, key_fn=lambda r: r[5], n=10)
+    si_brand10 = _top_n_simple(si_records, key_fn=lambda r: r[5], n=10)
 
-<div class="card">
-  <h2>入库 Top 5（按待入件数）</h2>
-  <table>
-    <tr><th>#</th><th>品牌 · 业务类型</th><th>单数</th><th>待入件数</th></tr>
-"""
-    for i, (key, d) in enumerate(si_top5, 1):
-        html += f'    <tr><td>{i}</td><td>{key}</td><td>{d["count"]}</td><td style="color:#d46b08;font-weight:bold;">{int(d["remain"]):,}</td></tr>\n'
+    so_types = _top_n_simple(so_records, key_fn=lambda r: r[12], n=50)
+    si_types = _top_n_simple(si_records, key_fn=lambda r: r[12], n=50)
 
-    html += f"""  </table>
-</div>
+    so_wh10 = _top_n_simple(so_records, key_fn=lambda r: r[2], n=10)
+    si_wh10 = _top_n_simple(si_records, key_fn=lambda r: r[2], n=10)
 
-<div class="footer">
-  <p>数据来源：吉客云 Open API · 每天 9:00（北京时间）自动刷新</p>
-</div>
-</body>
-</html>"""
+    # soComboTop5: 业务类型|仓库 组合，按未出库数量 Top 5
+    so_combo_top5 = _top_n_by(so_records,
+                              key_fn=lambda r: f'{r[12]}|{r[2]}',
+                              value_fn=lambda r: r[9],
+                              n=5)
 
-    # 写入仓库根目录（GitHub Pages 从这里读取）
-    output_path = 'index.html'
+    si_combo_top5 = _top_n_by(si_records,
+                              key_fn=lambda r: f'{r[12]}|{r[2]}',
+                              value_fn=lambda r: r[9],
+                              n=5)
+
+    # ---- 5. 筛选下拉列表（去重排序） ----
+    brands = sorted(set(r[5] for r in all_records if r[5]))
+    shops = sorted(set(r[11] for r in all_records if r[11]))
+    # types 和 whs 在原始 DATA 中都是仓库名称列表（字段名有历史原因）
+    whs = sorted(set(r[2] for r in all_records if r[2]))
+    types = whs  # types 字段与 whs 内容相同
+
+    # ---- 6. 月度趋势 ----
+    trend = _build_trend(so_records, si_records)
+
+    # ---- 7. 构建 DATA JSON ----
+    data_obj = {
+        'soNos': so_nos,
+        'soUnouted': so_unouted,
+        'soFmtUnouted': _fmt_number(so_unouted),
+        'siNos': si_nos,
+        'siUninner': si_uninner,
+        'siFmtUninner': _fmt_number(si_uninner),
+        'soRate': so_rate,
+        'siRate': si_rate,
+        'soTop5': so_top5,
+        'siTop5': si_top5,
+        'soBrand10': so_brand10,
+        'siBrand10': si_brand10,
+        'soTypes': so_types,
+        'siTypes': si_types,
+        'soWh10': so_wh10,
+        'siWh10': si_wh10,
+        'brands': brands,
+        'types': types,
+        'whs': whs,
+        'shops': shops,
+        'soComboTop5': so_combo_top5,
+        'siComboTop5': si_combo_top5,
+        '_trend': trend,
+        'records': all_records,
+    }
+
+    # 自定义 JSON 序列化：确保整数不变成浮点数，null 保持不变
+    json_data = json.dumps(data_obj, ensure_ascii=False, separators=(',', ':'))
+
+    # ---- 8. 拼接并写入 ----
+    html = template_before + '\nvar DATA = ' + json_data + ';\n' + template_after
+
+    output_path = os.path.join(OUT_DIR, 'index.html')
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html)
-    print(f'✅ 看板 HTML 已生成: {output_path} ({len(html)} 字节)')
 
+    size_kb = os.path.getsize(output_path) / 1024
+    print(f'✅ 看板 HTML 已生成: {output_path} ({size_kb:.0f} KB)')
+    print(f'   出库 {so_nos} 条 + 入库 {si_nos} 条 = 共 {len(all_records)} 条明细')
+
+
+# ============================================================
+# 主流程
+# ============================================================
 
 if __name__ == '__main__':
     print('=' * 60)
@@ -779,14 +957,14 @@ if __name__ == '__main__':
     # ---------------------------------
     # 阶段 2: Excel 生成
     # ---------------------------------
-    print(f'\n[阶段 2/4] Excel 报告生成')
+    print(f'\n[阶段 2/5] Excel 报告生成')
     print('-' * 40)
     excel_path = generate_excel(stockout, stockin)
 
     # ---------------------------------
     # 阶段 3: 邮件发送
     # ---------------------------------
-    print(f'\n[阶段 3/4] 邮件发送')
+    print(f'\n[阶段 3/5] 邮件发送')
     print('-' * 40)
 
     if SMTP_USER and SMTP_PASS and TO_ADDR:
@@ -798,7 +976,7 @@ if __name__ == '__main__':
     # ---------------------------------
     # 阶段 4: 企微推送
     # ---------------------------------
-    print(f'\n[阶段 4/4] 企业微信推送')
+    print(f'\n[阶段 4/5] 企业微信推送')
     print('-' * 40)
 
     if WECOM_WEBHOOKS:
@@ -806,7 +984,6 @@ if __name__ == '__main__':
     else:
         print('⚠️ 未配置企微 Webhook，跳过推送')
         print('  请设置 GitHub Secrets: WECOM_WEBHOOK_1, WECOM_WEBHOOK_2')
-
 
     # ---------------------------------
     # 阶段 5: 生成看板 HTML

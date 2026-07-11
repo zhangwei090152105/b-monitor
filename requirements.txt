@@ -2,4 +2,4 @@
 # 安装: pip install -r requirements.txt
 
 openpyxl>=3.1.0
-（内容由AI生成，仅供参考）
+#内容由AI生成，仅供参考

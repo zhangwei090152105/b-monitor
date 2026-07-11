@@ -60,13 +60,13 @@ MIAODA_URL = os.environ.get('MIAODA_URL', '')
 数据日期
 B_MONITOR_DATE = os.environ.get('B_MONITOR_DATE', '') or date.today().strftime('%Y%m%d')
 
-输出目录（相对于脚本所在目录）
+# 输出目录（相对于脚本所在目录）
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR = os.path.join(SCRIPT_DIR, 'output')
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # ============================================================
-阶段 1: API 调用层
+# 阶段 1: API 调用层
 # ============================================================
 
 STOCKOUT_COLS = (
@@ -272,7 +272,7 @@ def save_json(data, prefix):
     print(f'  [保存] {path} ({len(data)} 条)')
 
 # ============================================================
-阶段 2: Excel 生成
+# 阶段 2: Excel 生成
 # ============================================================
 
 def get_status_name(status, biz_type='out'):
@@ -439,7 +439,7 @@ def generate_excel(stockout, stockin):
     return out_path
 
 # ============================================================
-阶段 3: 邮件发送
+# 阶段 3: 邮件发送
 # ============================================================
 
 def _safe_int(n):
@@ -539,7 +539,7 @@ def send_email(excel_path, stockout, stockin):
     print(f'✅ 邮件发送成功 → {TO_ADDR}' + (f' (抄送 {CC_ADDR})' if CC_ADDR else ''))
 
 # ============================================================
-阶段 4: 企微推送
+# 阶段 4: 企微推送
 # ============================================================
 
 def send_wecom(stockout, stockin):

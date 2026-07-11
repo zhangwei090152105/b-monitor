@@ -37,6 +37,7 @@ jobs:
 
       - name: 执行 B 单监控
         env:
+        TZ: Asia/Shanghai
           # === 吉客云 API 凭证 ===
           JKY_APPKEY: ${{ secrets.JKY_APPKEY }}
           JKY_APPSECRET: ${{ secrets.JKY_APPSECRET }}

@@ -1,0 +1,70 @@
+# 吉客云 B 单未完结监控 - GitHub Actions 定时任务
+# cron: 北京时间每天 9:00 → UTC 1:00
+name: 吉客云B单未完结监控
+
+on:
+  schedule:
+    # 北京时间 9:00 = UTC 1:00（GitHub Actions cron 使用 UTC 时间）
+    - cron: '0 1 * * *'
+  
+  # 手动触发（支持在 GitHub Actions 页面点击 Run workflow）
+  workflow_dispatch:
+    inputs:
+      date_override:
+        description: '数据日期（YYYYMMDD，留空则使用当天）'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  b-monitor:
+    runs-on: ubuntu-latest
+    # 超时设为 30 分钟，避免被 GitHub Actions 默认 6 小时限制影响
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 执行 B 单监控
+        env:
+          # === 吉客云 API 凭证 ===
+          JKY_APPKEY: ${{ secrets.JKY_APPKEY }}
+          JKY_APPSECRET: ${{ secrets.JKY_APPSECRET }}
+
+          # === 邮件 SMTP ===
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          TO_ADDR: ${{ secrets.TO_ADDR }}
+          CC_ADDR: ${{ secrets.CC_ADDR }}
+
+          # === 企微 Webhook ===
+          WECOM_WEBHOOK_1: ${{ secrets.WECOM_WEBHOOK_1 }}
+          WECOM_WEBHOOK_2: ${{ secrets.WECOM_WEBHOOK_2 }}
+
+          # === 妙搭看板链接 ===
+          MIAODA_URL: ${{ secrets.MIAODA_URL }}
+
+          # === 可选：手动指定日期 ===
+          B_MONITOR_DATE: ${{ inputs.date_override }}
+
+        run: python main.py
+
+      - name: 上传 Excel 报告（Artifacts 备份）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b-monitor-report
+          path: output/*.xlsx
+          retention-days: 30

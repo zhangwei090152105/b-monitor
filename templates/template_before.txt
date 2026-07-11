@@ -1,0 +1,583 @@
+<!-- 吉客云 B 单未完结监控 v2.0 -->
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>吉客云 B 单未完结监控 v2.0</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+/* ===== CSS Variables (#22) ===== */
+:root {
+  --color-out: #F59E0B; --color-out-light: #FCD34D; --color-out-glow: rgba(245,158,11,0.4);
+  --color-in: #3B82F6; --color-in-light: #93C5FD; --color-in-glow: rgba(59,130,246,0.4);
+  --bg-page: #0F1520; --text-primary: #D0D7E8; --text-secondary: #B0B8C9; --text-muted: #8A96B5;
+  --bg-input: #2A3448; --border-color: #3A4560; --bg-hover: #25324A;
+  --glass-bg: rgba(30,42,58,0.72); --glass-border: rgba(255,255,255,0.06); --glass-shadow: 0 4px 24px rgba(0,0,0,0.3);
+  --card-radius: 14px; --card-bg-kpi: rgba(30,42,58,0.72);
+  --card-bg-chart: rgba(24,34,48,0.75); --card-bg-table: rgba(20,30,44,0.88);
+  --progress-bg: #2A3448; --row-even: #1D2A40; --th-bg: #141E2C;
+}
+[data-theme="light"] {
+  --bg-page: #f0f2f5; --text-primary: #1a1a2e; --text-secondary: #4a5568; --text-muted: #718096;
+  --bg-input: #e8ecf1; --border-color: #d1d5db; --bg-hover: #e2e8f0;
+  --glass-bg: rgba(255,255,255,0.82); --glass-border: rgba(0,0,0,0.06); --glass-shadow: 0 4px 20px rgba(0,0,0,0.06);
+  --card-bg-kpi: rgba(255,255,255,0.85); --card-bg-chart: rgba(255,255,255,0.78); --card-bg-table: rgba(255,255,255,0.92);
+  --progress-bg: #e5e7eb; --row-even: #f8fafc; --th-bg: #f1f5f9;
+}
+
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  background: radial-gradient(ellipse at 50% 0%, #1a2a40 0%, #0F1520 55%);
+  background-color: var(--bg-page);
+  font-family: -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif;
+  color: var(--text-primary); min-height: 100vh; -webkit-font-smoothing: antialiased;
+  transition: background 0.3s;
+}
+[data-theme="light"] body{background:radial-gradient(ellipse at 50% 0%,#e8ecf1 0%,#f0f2f5 55%);background-color:var(--bg-page)}
+/* Grid texture (#3) */
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:linear-gradient(rgba(255,255,255,0.015) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.015) 1px,transparent 1px);
+  background-size:40px 40px;
+}
+[data-theme="light"] body::before{background-image:linear-gradient(rgba(0,0,0,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,0,0,0.03) 1px,transparent 1px)}
+.container{max-width:1400px;margin:0 auto;padding:24px 20px;position:relative;z-index:1}
+
+/* ===== Animations ===== */
+@keyframes pulse{0%,100%{opacity:0.4}50%{opacity:0.8}}
+@keyframes slideUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes gradientFlow{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@keyframes breathe{0%,100%{transform:scale(1);opacity:0.8;box-shadow:0 0 4px rgba(34,197,94,0.4)}50%{transform:scale(1.35);opacity:1;box-shadow:0 0 12px rgba(34,197,94,0.8)}}
+@keyframes blink{0%,100%{opacity:0.4}50%{opacity:1}}
+@keyframes spinArc{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes slideDown{from{transform:translateY(-100%);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes numberGlow{0%{text-shadow:0 0 0 transparent}50%{text-shadow:0 0 30px currentColor}100%{text-shadow:0 0 0 transparent}}
+
+/* ===== Glass card base (#1) ===== */
+.glass-card{
+  background: var(--glass-bg); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); border-radius: var(--card-radius);
+  position: relative; overflow: visible; transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+}
+.glass-card:hover{transform:translateY(-3px);box-shadow:0 8px 32px rgba(0,0,0,0.45);border-color:rgba(255,255,255,0.12)}
+[data-theme="light"] .glass-card:hover{box-shadow:0 8px 28px rgba(0,0,0,0.12)}
+/* Gradient top border (#2) */
+.glass-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;z-index:1;border-radius:var(--card-radius) var(--card-radius) 0 0;
+}
+.glass-card.out::before{background:linear-gradient(90deg,#F59E0B,#FF6B00)}
+.glass-card.in::before{background:linear-gradient(90deg,#3B82F6,#60A5FA)}
+.glass-card.mixed::before{background:linear-gradient(90deg,#F59E0B,#3B82F6)}
+
+/* ===== Status Bar (#5, #15) ===== */
+.status-bar{display:flex;justify-content:space-between;align-items:center;padding:10px 20px;background:var(--card-bg-kpi);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--glass-border);border-radius:12px;margin-bottom:20px;font-size:13px;color:var(--text-muted)}
+.status-bar .sb-left{display:flex;align-items:center;gap:16px}
+.status-bar .sb-clock{color:var(--text-primary);font-size:18px;font-weight:700;font-variant-numeric:tabular-nums}
+.status-bar .sb-countdown{color:var(--text-secondary)}
+.status-bar .sb-right{display:flex;align-items:center;gap:12px}
+.status-dot{width:10px;height:10px;border-radius:50%;background:#22C55E;animation:breathe 2s ease-in-out infinite}
+.status-dot.off{background:#6B7280;animation:none}
+.status-dot.error{background:#EF4444;animation:blink 1s ease-in-out infinite}
+.status-dot.loading{width:14px;height:14px;background:transparent;border:2px solid transparent;border-top-color:#F59E0B;border-radius:50%;animation:spinArc 0.8s linear infinite}
+.btn-icon{background:var(--bg-input);border:1px solid var(--border-color);border-radius:6px;color:var(--text-secondary);padding:4px 10px;font-size:16px;cursor:pointer;transition:all .2s;line-height:1}
+.btn-icon:hover{color:var(--text-primary);border-color:var(--color-in)}
+.toggle-switch{position:relative;display:inline-block;width:40px;height:22px}
+.toggle-switch input{opacity:0;width:0;height:0}
+.toggle-slider{position:absolute;cursor:pointer;inset:0;background:var(--bg-input);border-radius:22px;transition:.3s;border:1px solid var(--border-color)}
+.toggle-slider::before{content:'';position:absolute;height:16px;width:16px;left:2px;bottom:2px;background:var(--text-muted);border-radius:50%;transition:.3s}
+.toggle-switch input:checked+.toggle-slider{background:var(--color-in);border-color:var(--color-in)}
+.toggle-switch input:checked+.toggle-slider::before{transform:translateX(18px);background:#fff}
+
+/* ===== Alert Banner (#18) ===== */
+.alert-banner{display:none;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);border-radius:10px;padding:12px 20px;margin-bottom:16px;color:#FCA5A5;font-size:13px;cursor:pointer;animation:slideDown 0.3s ease-out;align-items:center;justify-content:space-between;gap:12px}
+.alert-banner.show{display:flex}
+.alert-banner .alert-close{background:none;border:none;color:#FCA5A5;cursor:pointer;font-size:18px;padding:0 4px;line-height:1}
+
+/* ===== Skeleton ===== */
+.skeleton{display:block}
+.skeleton.hidden{display:none}
+.skeleton-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px}
+.skel-kpi{height:88px;background:var(--card-bg-kpi);border-radius:12px;animation:pulse 1.5s ease-in-out infinite}
+.skel-progress{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.skel-pcard{height:120px;background:var(--card-bg-chart);border-radius:12px;animation:pulse 1.5s ease-in-out infinite;animation-delay:0.2s}
+.skel-table{height:300px;background:var(--card-bg-table);border-radius:12px;animation:pulse 1.5s ease-in-out infinite;animation-delay:0.4s}
+
+/* ===== Header (#6) ===== */
+.header{text-align:center;margin-bottom:24px;position:relative}
+.header h1{color:#FFF;font-size:28px;font-weight:700;letter-spacing:2px}
+[data-theme="light"] .header h1{color:#1a1a2e}
+.header .subtitle{color:var(--text-muted);font-size:13px;margin-top:6px}
+.header .deco-line{width:120px;height:3px;border-radius:2px;background:linear-gradient(90deg,#F59E0B,#3B82F6,#F59E0B);background-size:200% 100%;animation:gradientFlow 4s linear infinite;margin:12px auto 0}
+.header .header-right{position:absolute;top:0;right:0;display:flex;align-items:center;gap:10px}
+
+/* ===== KPI Cards (#1, #4) ===== */
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:8px}
+.kpi-card{padding:18px 28px;min-height:88px;display:flex;align-items:center;gap:14px}
+.kpi-card:nth-child(1){animation:slideUp 0.4s ease-out 0s both}
+.kpi-card:nth-child(2){animation:slideUp 0.4s ease-out .1s both}
+.kpi-card:nth-child(3){animation:slideUp 0.4s ease-out .2s both}
+.kpi-card:nth-child(4){animation:slideUp 0.4s ease-out .3s both}
+.kpi-icon{width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
+.kpi-info{display:flex;flex-direction:column;min-width:0;flex:1}
+.kpi-label{color:var(--text-secondary);font-size:13px;white-space:nowrap}
+.kpi-value-wrap{display:flex;align-items:baseline;gap:8px}
+.kpi-value{font-size:46px;font-weight:700;line-height:1.15;font-variant-numeric:tabular-nums}
+.kpi-card.out .kpi-value{color:#FFD700;text-shadow:0 0 20px rgba(245,158,11,0.4)}
+.kpi-card.in .kpi-value{color:#4A90E2;text-shadow:0 0 20px rgba(59,130,246,0.4)}
+.kpi-change{font-size:14px;font-weight:700}
+.kpi-change.up{color:#10B981}.kpi-change.down{color:#EF4444}
+.kpi-alert{position:absolute;top:12px;right:14px;width:10px;height:10px;border-radius:50%}
+.kpi-alert.red{background:#EF4444;box-shadow:0 0 8px #EF4444}
+.kpi-alert.yellow{background:#F59E0B;box-shadow:0 0 8px #F59E0B}
+.kpi-alert.green{background:#10B981;box-shadow:0 0 8px #10B981}
+
+/* ===== Progress (#3) ===== */
+.progress-section{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.progress-card{padding:20px 24px}
+.progress-title{color:var(--text-secondary);font-size:14px;font-weight:600;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.progress-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.progress-dot.so{background:var(--color-out)}.progress-dot.si{background:var(--color-in)}
+.progress-row{display:flex;align-items:center;margin-bottom:12px;gap:10px}
+.progress-row:last-child{margin-bottom:0}
+.progress-tag{font-size:12px;color:var(--text-muted);min-width:32px;white-space:nowrap}
+.progress-bar-wrap{flex:1;min-width:0}
+.progress-bar{height:12px;border-radius:6px;background:var(--progress-bg);overflow:hidden}
+.progress-fill{height:100%;border-radius:6px;width:0;transition:width 1s cubic-bezier(0.4,0,0.2,1)}
+.progress-fill.so{background:#FDE68A}.progress-fill.si{background:#BFDBFE}
+.progress-pct{font-size:14px;font-weight:700;min-width:50px;text-align:right;margin-left:8px}
+.progress-pct.so{color:var(--color-out)}.progress-pct.si{color:var(--color-in)}
+.progress-summary{font-size:12px;color:var(--text-muted);margin-top:12px;line-height:1.6}
+.progress-summary span.so{color:var(--color-out);font-weight:600}
+.progress-summary span.si{color:#4A90E2;font-weight:600}
+
+/* ===== Top 5 (#11) ===== */
+.top5-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.top5-row:last-child{margin-bottom:0}
+.top5-card{padding:20px 24px}
+.top5-title{color:var(--text-secondary);font-size:14px;font-weight:600;margin-bottom:16px}
+.top5-title .hint{font-size:11px;color:var(--text-muted);font-weight:400}
+.top5-list{list-style:none}
+.top5-item{display:flex;align-items:center;padding:14px 0;border-bottom:1px solid var(--border-color);cursor:pointer;border-radius:6px;margin:0 -8px;padding-left:8px;padding-right:8px;transition:background .2s;position:relative}
+.top5-item:last-child{border-bottom:none}
+.top5-item:hover{background:var(--bg-hover)}
+.top5-item.active{border-left:3px solid #4A90E2;padding-left:5px;background:var(--bg-hover)}
+.top5-rank{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;margin-right:14px;flex-shrink:0;color:var(--text-muted);background:var(--bg-input)}
+.top5-rank.r1{background:linear-gradient(135deg,#FFD700,#F59E0B);color:#FFF;font-size:16px}
+.top5-rank.r2{background:linear-gradient(135deg,#C0C0C0,#9CA3AF);color:#FFF;font-size:16px}
+.top5-rank.r3{background:linear-gradient(135deg,#CD7F32,#B45309);color:#FFF;font-size:16px}
+.top5-info{flex:1;min-width:0}
+.top5-name{color:var(--text-primary);font-size:13px;line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.top5-sub{color:var(--text-muted);font-size:11px;line-height:1.5;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.top5-qty{font-size:20px;font-weight:700;margin-left:14px;white-space:nowrap}
+.top5-qty.so{color:#FFD700}.top5-qty.si{color:#4A90E2}
+.top5-nos{font-size:12px;color:var(--text-muted);margin-left:10px;white-space:nowrap}
+
+/* ===== Charts ===== */
+.charts-section{animation:fadeIn 0.6s ease-out}
+.charts-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.chart-card{padding:20px}
+.chart-card.full{grid-column:1/-1}
+.chart-title{color:var(--text-secondary);font-size:14px;font-weight:600;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+.chart-filter-label{font-size:10px;color:var(--text-muted);font-weight:400;cursor:pointer;user-select:none;transition:color .2s;white-space:nowrap}
+.chart-filter-label:hover{color:#4A90E2}
+.chart-filter-label.active{color:#F59E0B;font-weight:600}
+.chart-filter-label .cf-clear{margin-left:4px;color:#F59E0B;cursor:pointer;font-weight:700}
+.chart-filter-label .cf-clear:hover{color:#EF4444}
+.chart-box{width:100%;height:320px;cursor:pointer}
+.chart-placeholder{display:flex;align-items:center;justify-content:center;height:320px;color:var(--text-muted);font-size:13px}
+
+.sec-title{color:var(--text-secondary);font-size:16px;font-weight:700;margin-bottom:16px;padding-left:14px;border-left:4px solid #4A90E2;line-height:1.3}
+.sec-block{margin-bottom:32px}
+
+/* ===== Summary Stats (#13) ===== */
+.summary-stats{display:flex;flex-wrap:wrap;gap:8px 20px;padding:10px 20px;margin-bottom:12px;background:var(--card-bg-kpi);border:1px solid var(--glass-border);border-radius:10px;font-size:12px;color:var(--text-muted);transition:opacity .3s}
+.summary-stats span{white-space:nowrap}
+.summary-stats .ss-val{color:var(--text-primary);font-weight:600}
+.summary-stats .ss-warn{color:#EF4444;font-weight:600}
+.summary-stats .ss-ok{color:#10B981;font-weight:600}
+
+/* ===== Filter Section ===== */
+.filter-section{background:var(--glass-bg);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--glass-border);border-radius:var(--card-radius);padding:16px 20px;box-shadow:var(--glass-shadow);position:relative;z-index:2}
+.filter-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.filter-row input[type="text"]{background:var(--bg-input);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary);padding:8px 14px;font-size:13px;width:260px;outline:none;transition:border .2s}
+.filter-row input[type="text"]:focus{border-color:#4A90E2}
+.filter-row input[type="text"]::placeholder{color:var(--text-muted)}
+.multiselect{position:relative;min-width:150px;overflow:visible}
+.ms-trigger{background:var(--bg-input);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary);padding:8px 30px 8px 14px;font-size:13px;cursor:pointer;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;max-width:200px;user-select:none;position:relative}
+.ms-trigger:hover{border-color:#4A90E2}
+.ms-trigger::after{content:'\25BE';position:absolute;right:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:10px}
+.ms-dropdown{display:none;position:absolute;top:100%;left:0;z-index:1100;background:var(--card-bg-table);border:1px solid var(--border-color);border-radius:6px;min-width:240px;max-height:360px;overflow-y:auto;margin-top:4px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.ms-dropdown.open{display:block}
+/* Portal mode: when dropdown is moved to body, use fixed positioning */
+.ms-dropdown.portal{position:fixed;z-index:99999;margin-top:0}
+.ms-actions{display:flex;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border-color);position:sticky;top:0;background:var(--card-bg-table);z-index:2}
+.ms-actions a{font-size:12px;color:var(--color-in);cursor:pointer;text-decoration:none}
+.ms-actions a:hover{color:var(--color-in-light)}
+/* Search input inside dropdown */
+.ms-search{position:sticky;top:0;z-index:3;padding:8px 14px;background:var(--card-bg-table);border-bottom:1px solid var(--border-color)}
+.ms-search input{width:100%;box-sizing:border-box;background:var(--bg-input);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary);padding:6px 10px;font-size:12px;outline:none;transition:border .2s}
+.ms-search input:focus{border-color:#4A90E2}
+.ms-search input::placeholder{color:var(--text-muted)}
+.ms-no-result{display:none;padding:16px 14px;font-size:12px;color:var(--text-muted);text-align:center}
+.ms-dropdown label{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:13px;color:var(--text-secondary);cursor:pointer;transition:background .15s}
+.ms-dropdown label:hover{background:var(--bg-input)}
+.ms-dropdown label.hidden{display:none}
+.ms-dropdown input[type="checkbox"]{accent-color:#4A90E2;width:14px;height:14px}
+.filter-actions{display:flex;gap:8px;margin-left:auto;align-items:center}
+.filter-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.filter-tag{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:12px;font-size:11px;background:rgba(59,130,246,0.15);color:#60A5FA;cursor:pointer}
+.filter-tag .ft-close{margin-left:4px;font-weight:700;opacity:0.7}
+.filter-tag:hover .ft-close{opacity:1}
+.filter-tag.so-tag{background:rgba(245,158,11,0.15);color:#F59E0B}
+.btn{background:var(--bg-input);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary);padding:8px 16px;font-size:13px;cursor:pointer;transition:all .2s;white-space:nowrap}
+.btn:hover{background:var(--border-color)}
+.btn.export-btn{background:rgba(59,130,246,.15);border:1px solid #60A5FA;color:#60A5FA;font-weight:600}
+.btn.export-btn:hover{background:rgba(59,130,246,.25);color:var(--color-in-light)}
+.btn.reset-btn{border-color:#EF4444;color:#EF4444;background:rgba(239,68,68,.1)}
+.btn.reset-btn:hover{background:rgba(239,68,68,.2)}
+.filter-toggle{display:none}
+
+/* ===== Column Visibility Panel (#19) ===== */
+.col-panel{display:none;position:absolute;top:100%;right:0;z-index:101;background:var(--card-bg-table);border:1px solid var(--border-color);border-radius:8px;padding:12px;min-width:200px;box-shadow:0 8px 24px rgba(0,0,0,.5);margin-top:4px}
+.col-panel.open{display:block}
+.col-panel h4{font-size:13px;color:var(--text-secondary);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border-color)}
+.col-panel label{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;color:var(--text-muted);cursor:pointer}
+.col-panel label.locked{opacity:0.6;cursor:not-allowed}
+.col-panel input[type="checkbox"]{accent-color:#4A90E2;width:13px;height:13px}
+
+/* ===== Table (#12, #17) ===== */
+.table-section{margin-top:16px}
+.table-card{background:var(--glass-bg);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--glass-border);border-radius:var(--card-radius);box-shadow:var(--glass-shadow);overflow:visible}
+.table-header-bar{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border-color);position:sticky;top:0;z-index:5;background:var(--glass-bg);border-radius:var(--card-radius) var(--card-radius) 0 0;position:relative}
+.table-header-bar span{color:var(--text-muted);font-size:13px}
+.table-wrap{overflow-x:auto}
+.table-wrap .hint{color:var(--text-muted);font-size:11px;padding:6px 20px 0;font-style:italic}
+.table-scroll{max-height:520px;overflow-y:auto;overflow-x:auto;display:inline-block;min-width:100%}
+.table-scroll table{width:100%;border-collapse:collapse;min-width:1400px;table-layout:auto}
+thead th{color:var(--text-secondary);font-size:12px;font-weight:700;padding:9px 10px;white-space:nowrap;cursor:pointer;user-select:none;border-bottom:2px solid var(--border-color);background:var(--th-bg)}
+thead{position:sticky;top:0;z-index:3}
+thead th:nth-child(1){position:sticky;left:0;z-index:5;min-width:100px}
+thead th:nth-child(2){position:sticky;left:100px;z-index:5;min-width:80px}
+thead th:nth-child(3){min-width:90px}thead th:nth-child(4){min-width:100px}thead th:nth-child(5){min-width:140px}
+thead th:nth-child(6){min-width:140px}thead th:nth-child(7){min-width:100px}thead th:nth-child(8){min-width:180px}
+thead th:nth-child(9){min-width:90px}thead th:nth-child(10){min-width:130px}thead th:nth-child(11){min-width:80px}
+thead th:nth-child(12){min-width:80px}thead th:nth-child(13){min-width:70px}
+thead th:hover{color:#FFF}
+[data-theme="light"] thead th:hover{color:#1a1a2e}
+thead th .sort-icon{margin-left:3px;font-size:10px;color:var(--text-muted)}
+thead th .sort-icon.active{color:#4A90E2}
+.al{text-align:left}.ar{text-align:right}.ac{text-align:center}
+tbody td{padding:8px 10px;font-size:12px;color:var(--text-primary);white-space:nowrap;border-bottom:1px solid var(--border-color)}
+tbody td:nth-child(1){position:sticky;left:0;z-index:2}
+tbody td:nth-child(2){position:sticky;left:100px;z-index:2}
+tbody tr:nth-child(odd){background:transparent}
+tbody tr:nth-child(even){background:var(--row-even)}
+/* #17 abnormal row */
+tbody tr.row-danger{background:rgba(239,68,68,0.08)!important;border-left:3px solid #EF4444}
+tbody tr.row-ok{background:rgba(34,197,94,0.05)!important}
+tbody tr:hover{background:var(--bg-hover)!important}
+td.num{font-size:13px;font-weight:700}
+td.num.so{color:#FFD700}td.num.si{color:#4A90E2}
+td.rate{font-weight:600;font-size:12px}
+td.rate.r{color:#EF4444}td.rate.y{color:var(--color-out)}td.rate.g{color:#10B981}
+/* Row expand detail (#12) */
+tr.expand-row{display:none}
+tr.expand-row.show{display:table-row}
+tr.expand-row td{padding:0!important;border-bottom:1px solid var(--border-color)}
+.expand-panel{display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;padding:14px 20px;background:rgba(0,0,0,0.12);font-size:12px;color:var(--text-secondary);max-height:0;overflow:hidden;transition:max-height .3s,padding .3s}
+[data-theme="light"] .expand-panel{background:rgba(0,0,0,0.04)}
+tr.expand-row.show .expand-panel{max-height:500px;padding:14px 20px}
+.expand-panel .ep-item{display:flex;gap:4px}
+.expand-panel .ep-label{color:var(--text-muted);min-width:70px}
+.expand-panel .ep-val{color:var(--text-primary)}
+
+/* ===== Pagination (#16) ===== */
+.pagination{display:flex;justify-content:center;align-items:center;gap:6px;padding:14px 20px;border-top:1px solid var(--border-color);flex-wrap:wrap}
+.pagination button{background:var(--bg-input);border:1px solid var(--border-color);border-radius:6px;color:var(--text-secondary);padding:5px 12px;font-size:12px;cursor:pointer;transition:all .15s}
+.pagination button:hover:not(:disabled){background:var(--border-color);color:var(--text-primary)}
+.pagination button:disabled{opacity:.4;cursor:default}
+.pagination .page-info{color:var(--text-muted);font-size:12px;margin:0 8px}
+.pagination select{background:var(--bg-input);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary);padding:5px 8px;font-size:12px;cursor:pointer}
+.pagination input[type="number"]{background:var(--bg-input);border:1px solid var(--border-color);border-radius:6px;color:var(--text-primary);padding:5px 8px;font-size:12px;width:52px;text-align:center}
+.pagination .ellipsis{color:var(--text-muted);padding:5px 4px}
+
+/* ===== Footer ===== */
+.footer{margin-top:32px;padding:24px 20px;border-top:1px solid var(--border-color);display:grid;grid-template-columns:1fr 1fr 1fr;align-items:center;font-size:12px}
+.footer-left{color:var(--text-muted);text-align:left}
+.footer-center{color:var(--text-secondary);text-align:center}
+.footer-right{color:var(--text-muted);text-align:right}
+
+/* ===== Toast (#14/#20) ===== */
+.toast{position:fixed;bottom:24px;right:24px;z-index:9999;background:var(--card-bg-table);border-left:3px solid #10B981;color:var(--text-primary);padding:12px 20px;border-radius:6px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.5);animation:fadeIn 0.3s ease-out;max-width:360px}
+.toast.fadeout{opacity:0;transition:opacity 0.4s ease-out}
+
+/* ===== Theme toggle (#21) ===== */
+.theme-btn{background:var(--bg-input);border:1px solid var(--border-color);border-radius:20px;color:var(--text-secondary);font-size:18px;cursor:pointer;padding:4px 10px;transition:all .3s;line-height:1}
+.theme-btn:hover{color:var(--text-primary);border-color:var(--color-in)}
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--card-bg-table)}
+::-webkit-scrollbar-thumb{background:var(--border-color);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:#4A90E2}
+
+/* ===== Responsive (#25) ===== */
+@media (max-width:480px){
+  .container{padding:8px 4px}
+  .kpi-row{grid-template-columns:1fr;gap:8px}
+  .kpi-card{padding:10px 12px;min-height:64px;gap:8px}
+  .kpi-value{font-size:32px}
+  .kpi-label{font-size:10px}
+  .progress-section{grid-template-columns:1fr;gap:10px}
+  .top5-row{grid-template-columns:1fr;gap:10px}
+  .charts-grid{grid-template-columns:1fr;gap:10px}
+  .chart-box{height:220px}
+  .filter-row{flex-direction:column;align-items:stretch}
+  .filter-row input[type="text"]{width:100%}
+  .ms-trigger{max-width:none}
+  .filter-actions{margin-left:0;justify-content:space-between}
+  .status-bar{flex-direction:column;gap:6px;padding:8px 12px;font-size:11px}
+  .status-bar .sb-clock{font-size:15px}
+  .header h1{font-size:18px}
+  .sec-title{font-size:12px}
+  .footer{grid-template-columns:1fr;gap:8px;text-align:center}
+  .footer-left,.footer-center,.footer-right{text-align:center}
+  thead th:nth-child(1){min-width:80px}thead th:nth-child(2){min-width:60px;left:80px}
+  tbody td:nth-child(2){left:80px}
+  .table-scroll{max-height:300px}
+  .summary-stats{font-size:10px;gap:4px 10px}
+  .header .header-right{position:static;justify-content:center;margin-top:10px}
+}
+@media (min-width:481px) and (max-width:768px){
+  .container{padding:12px 8px}
+  .kpi-row{grid-template-columns:repeat(2,1fr);gap:8px}
+  .kpi-card{padding:12px 14px;min-height:72px;gap:10px}
+  .kpi-value{font-size:34px}
+  .progress-section{grid-template-columns:1fr;gap:10px}
+  .top5-row{grid-template-columns:1fr;gap:10px}
+  .charts-grid{grid-template-columns:1fr;gap:10px}
+  .chart-box{height:260px}
+  .filter-toggle{display:inline-block}
+  .filter-row.collapsed{display:none}
+  .filter-row{flex-direction:column;align-items:stretch}
+  .filter-row input[type="text"]{width:100%}
+  .ms-trigger{max-width:none}
+  .filter-actions{margin-left:0;justify-content:space-between}
+  .filter-section{padding:12px 14px}
+  .table-scroll{max-height:380px}
+  .header h1{font-size:22px}
+  .status-bar{font-size:11px;gap:10px}
+  .header .header-right{position:static;justify-content:center;margin-top:8px}
+}
+@media (min-width:769px) and (max-width:1200px){
+  .kpi-row{grid-template-columns:repeat(2,1fr)}
+  .charts-grid{grid-template-columns:1fr}
+}
+@media (min-width:1441px){
+  .container{max-width:1600px}
+  .kpi-card{padding:22px 32px;min-height:96px}
+  .kpi-value{font-size:52px}
+  .chart-box{height:380px}
+  .table-scroll{max-height:640px}
+}
+.container:fullscreen,.container:-webkit-full-screen{max-width:100%!important;padding:24px 32px}
+
+.back-to-top{position:fixed;bottom:24px;right:24px;z-index:999;width:44px;height:44px;border-radius:50%;background:rgba(30,42,58,0.7);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.1);color:var(--text-secondary);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .3s;box-shadow:0 4px 16px rgba(0,0,0,0.3)}
+.back-to-top.visible{opacity:1;pointer-events:auto}
+.back-to-top:hover{background:rgba(59,130,246,0.3);border-color:rgba(59,130,246,0.5);color:#fff}
+[data-theme="light"] .back-to-top{background:rgba(255,255,255,0.8);box-shadow:0 4px 16px rgba(0,0,0,0.1)}
+</style>
+</head>
+<body>
+<div class="container">
+<!-- Status Bar (#5, #8, #15) -->
+<div class="status-bar">
+<div class="sb-left">
+<span class="sb-clock" id="liveClock">--:--:--</span>
+<span class="sb-countdown" id="countdownLabel">下次刷新 04:59</span>
+</div>
+<div class="sb-right">
+<button class="btn-icon" onclick="App.manualRefresh()" title="立即刷新">&#x21bb;</button>
+<label class="toggle-switch" title="自动刷新"><input type="checkbox" id="autoRefreshToggle" checked onchange="App.toggleAutoRefresh()"><span class="toggle-slider"></span></label>
+<span class="status-dot" id="statusDot"></span>
+<span style="font-size:12px;color:var(--text-muted)" id="statusLabel">在线</span>
+</div>
+</div>
+
+<!-- Alert Banner (#18) -->
+<div class="alert-banner" id="alertBanner" onclick="App.showAbnormalRows()">
+<span>&#x26a0; 出库单据完结率为 0%%，存在异常未完结单据，点击查看</span>
+<button class="alert-close" onclick="event.stopPropagation();App.dismissAlert()">&times;</button>
+</div>
+
+<!-- Header -->
+<div class="header">
+<h1>吉客云 B 单未完结监控</h1>
+<div class="subtitle">刷新时间: <span id="genTime"></span></div>
+<div class="deco-line"></div>
+<div class="header-right">
+<button class="theme-btn" onclick="App.toggleTheme()" title="切换主题" id="themeBtn">&#x1f319;</button>
+<button class="btn-icon" onclick="App.toggleFullscreen()" title="全屏模式" style="font-size:16px">&#x26f6;</button>
+<button class="btn-icon" onclick="App.copyShareLink()" title="复制分享链接" style="font-size:13px">&#x1f4cb;</button>
+</div>
+</div>
+
+<!-- Skeleton Loading -->
+<div class="skeleton" id="skeleton">
+<div class="skeleton-row"><div class="skel-kpi"></div><div class="skel-kpi"></div><div class="skel-kpi"></div><div class="skel-kpi"></div></div>
+<div class="skel-progress"><div class="skel-pcard"></div><div class="skel-pcard"></div></div>
+<div class="skel-table"></div>
+</div>
+
+<div id="mainContent" style="display:none">
+
+<!-- KPI Cards -->
+<div class="sec-block">
+<div class="kpi-row">
+<div class="kpi-card glass-card out">
+<div class="kpi-icon">&#x1f4e6;</div>
+<div class="kpi-info"><div class="kpi-label">出库未完结单数</div><div class="kpi-value-wrap"><div class="kpi-value" id="soNosVal">--</div><span class="kpi-change" id="soNosChg"></span></div></div>
+<div class="kpi-alert" id="soAlert"></div>
+</div>
+<div class="kpi-card glass-card out">
+<div class="kpi-icon">&#x1f4ca;</div>
+<div class="kpi-info"><div class="kpi-label">出库待出库数量</div><div class="kpi-value-wrap"><div class="kpi-value" id="soUnoutedVal">--</div><span class="kpi-change" id="soUnoutedChg"></span></div></div>
+<div class="kpi-alert" id="soUnoutedAlert"></div>
+</div>
+<div class="kpi-card glass-card in">
+<div class="kpi-icon">&#x1f4e5;</div>
+<div class="kpi-info"><div class="kpi-label">入库未完结单数</div><div class="kpi-value-wrap"><div class="kpi-value" id="siNosVal">--</div><span class="kpi-change" id="siNosChg"></span></div></div>
+<div class="kpi-alert" id="siAlert"></div>
+</div>
+<div class="kpi-card glass-card in">
+<div class="kpi-icon">&#x1f4c8;</div>
+<div class="kpi-info"><div class="kpi-label">入库待入库数量</div><div class="kpi-value-wrap"><div class="kpi-value" id="siUninnerVal">--</div><span class="kpi-change" id="siUninnerChg"></span></div></div>
+<div class="kpi-alert" id="siUninnerAlert"></div>
+</div>
+</div>
+</div>
+
+<!-- Progress -->
+<div class="sec-block">
+<div class="sec-title">汇总概览</div>
+<div class="progress-section">
+<div class="progress-card glass-card out">
+<div class="progress-title"><span class="progress-dot so"></span>出库完成率</div>
+<div class="progress-row"><span class="progress-tag">单数</span><div class="progress-bar-wrap"><div class="progress-bar"><div class="progress-fill so" id="soBarNos"></div></div></div><span class="progress-pct so" id="soPctNos">0.0%</span></div>
+<div class="progress-row"><span class="progress-tag">件数</span><div class="progress-bar-wrap"><div class="progress-bar"><div class="progress-fill so" id="soBarQty"></div></div></div><span class="progress-pct so" id="soPctQty">0.0%</span></div>
+<div class="progress-summary">出库未完结：<span class="so" id="soSummaryNos">--</span> 单 / <span class="so" id="soSummaryQty">--</span> 件</div>
+</div>
+<div class="progress-card glass-card in">
+<div class="progress-title"><span class="progress-dot si"></span>入库完成率</div>
+<div class="progress-row"><span class="progress-tag">单数</span><div class="progress-bar-wrap"><div class="progress-bar"><div class="progress-fill si" id="siBarNos"></div></div></div><span class="progress-pct si" id="siPctNos">0.0%</span></div>
+<div class="progress-row"><span class="progress-tag">件数</span><div class="progress-bar-wrap"><div class="progress-bar"><div class="progress-fill si" id="siBarQty"></div></div></div><span class="progress-pct si" id="siPctQty">0.0%</span></div>
+<div class="progress-summary">入库未完结：<span class="si" id="siSummaryNos">--</span> 单 / <span class="si" id="siSummaryQty">--</span> 件</div>
+</div>
+</div>
+</div>
+
+<!-- Top 5 -->
+<div class="sec-block">
+<div class="sec-title">未完结 Top 5</div>
+<div class="top5-row">
+<div class="top5-card glass-card out"><div class="top5-title">出库 单据类型&middot;仓库 Top 5 <span class="hint">(待出库数量)</span></div><ul class="top5-list" id="soComboTop5"></ul></div>
+<div class="top5-card glass-card in"><div class="top5-title">入库 单据类型&middot;仓库 Top 5 <span class="hint">(待入库数量)</span></div><ul class="top5-list" id="siComboTop5"></ul></div>
+</div>
+<div class="top5-row">
+<div class="top5-card glass-card out"><div class="top5-title">出库 品牌 Top 5 <span class="hint">(待出库数量)</span></div><ul class="top5-list" id="soBrandTop5"></ul></div>
+<div class="top5-card glass-card in"><div class="top5-title">入库 品牌 Top 5 <span class="hint">(待入库数量)</span></div><ul class="top5-list" id="siBrandTop5"></ul></div>
+</div>
+</div>
+
+<!-- Charts -->
+<div class="sec-block charts-section">
+<div class="sec-title">数据分析</div>
+<div class="charts-grid">
+<div class="chart-card glass-card out"><div class="chart-title">出库品牌 Top 10 <span class="chart-filter-label" id="cfl1">点击柱体筛选</span></div><div class="chart-box" id="chart1"><div class="chart-placeholder">加载中...</div></div></div>
+<div class="chart-card glass-card in"><div class="chart-title">入库品牌 Top 10 <span class="chart-filter-label" id="cfl2">点击柱体筛选</span></div><div class="chart-box" id="chart2"><div class="chart-placeholder">加载中...</div></div></div>
+<div class="chart-card glass-card mixed"><div class="chart-title">出库业务类型分布 <span class="chart-filter-label" id="cfl3">点击扇区筛选</span></div><div class="chart-box" id="chart3"><div class="chart-placeholder">加载中...</div></div></div>
+<div class="chart-card glass-card mixed"><div class="chart-title">入库业务类型分布 <span class="chart-filter-label" id="cfl4">点击扇区筛选</span></div><div class="chart-box" id="chart4"><div class="chart-placeholder">加载中...</div></div></div>
+<div class="chart-card glass-card out"><div class="chart-title">出库仓库 Top 10 <span class="chart-filter-label" id="cfl5">点击柱体筛选</span></div><div class="chart-box" id="chart5"><div class="chart-placeholder">加载中...</div></div></div>
+<div class="chart-card glass-card in"><div class="chart-title">入库仓库 Top 10 <span class="chart-filter-label" id="cfl6">点击柱体筛选</span></div><div class="chart-box" id="chart6"><div class="chart-placeholder">加载中...</div></div></div>
+<div class="chart-card glass-card full mixed" id="chartCard7"><div class="chart-title">月度趋势</div><div class="chart-box" id="chart7" style="height:360px"><div class="chart-placeholder">暂无趋势数据，请检查数据源</div></div></div>
+</div>
+</div>
+
+<!-- Table Section -->
+<div class="sec-block">
+<div class="sec-title">明细数据</div>
+<div class="filter-section">
+<div class="filter-row" id="filterRow">
+<input type="text" id="searchInput" placeholder="搜索所有字段...">
+<div class="multiselect" id="msBiz"><div class="ms-trigger" onclick="App.toggleMs('msBiz')">业务类型 (全部)</div><div class="ms-dropdown" id="msBiz-dd"></div></div>
+<div class="multiselect" id="msShop"><div class="ms-trigger" onclick="App.toggleMs('msShop')">店铺 (全部)</div><div class="ms-dropdown" id="msShop-dd"></div></div>
+<div class="multiselect" id="msBrand"><div class="ms-trigger" onclick="App.toggleMs('msBrand')">品牌 (全部)</div><div class="ms-dropdown" id="msBrand-dd"></div></div>
+<div class="multiselect" id="msRepo"><div class="ms-trigger" onclick="App.toggleMs('msRepo')">仓库 (全部)</div><div class="ms-dropdown" id="msRepo-dd"></div></div>
+<div class="filter-actions">
+<button class="btn export-btn" onclick="App.exportCSV()">&#x2b07; 导出 CSV</button>
+<button class="btn reset-btn" onclick="App.resetFilters()">重置</button>
+</div>
+</div>
+<div class="filter-tags" id="filterTags"></div>
+<button class="btn filter-toggle" onclick="App.toggleFilters()" style="margin-bottom:8px">筛选</button>
+</div>
+<!-- Summary Stats (#13) -->
+<div class="summary-stats" id="summaryStats"></div>
+<div class="table-section">
+<div class="table-card">
+<div class="table-header-bar">
+<span>共 <strong id="totalCount">0</strong> 条明细</span>
+<div style="display:flex;align-items:center;gap:10px">
+<span style="font-size:12px;color:var(--text-muted)">异常 <span id="abnormalCount" style="color:#EF4444;font-weight:600">0</span> 条 / 正常 <span id="normalCount" style="font-weight:600">0</span> 条 / 已完结 <span id="doneCount" style="color:#10B981;font-weight:600">0</span> 条</span>
+<div style="position:relative">
+<button class="btn-icon" onclick="App.toggleColPanel()" title="列显示" style="font-size:14px">&#x2699;</button>
+<div class="col-panel" id="colPanel">
+<h4>列显示设置</h4>
+<div id="colPanelChecks"></div>
+</div>
+</div>
+</div>
+</div>
+<div class="table-wrap">
+<div class="hint">&#x2194; 可左右滑动查看更多列 | 点击行展开详情</div>
+<div class="table-scroll" id="tableScroll">
+<table id="mainTable">
+<thead>
+<tr>
+<th class="al" onclick="App.sortTable(0)">申请时间 <span class="sort-icon" id="si0"></span></th>
+<th class="al" onclick="App.sortTable(1)">单据类型 <span class="sort-icon" id="si1"></span></th>
+<th class="al" onclick="App.sortTable(2)">业务类型 <span class="sort-icon" id="si2"></span></th>
+<th class="al" onclick="App.sortTable(3)">仓库 <span class="sort-icon" id="si3"></span></th>
+<th class="al" onclick="App.sortTable(4)">单号 <span class="sort-icon" id="si4"></span></th>
+<th class="al" onclick="App.sortTable(5)">关联单号 <span class="sort-icon" id="si5"></span></th>
+<th class="al" onclick="App.sortTable(6)">店铺 <span class="sort-icon" id="si6"></span></th>
+<th class="al" onclick="App.sortTable(7)">品牌 <span class="sort-icon" id="si7"></span></th>
+<th class="al" onclick="App.sortTable(8)">货品 <span class="sort-icon" id="si8"></span></th>
+<th class="al" onclick="App.sortTable(9)">商品条码 <span class="sort-icon" id="si9"></span></th>
+<th class="ar" onclick="App.sortTable(10)">申请数量 <span class="sort-icon" id="si10"></span></th>
+<th class="ar" onclick="App.sortTable(11)">未完结数量 <span class="sort-icon" id="si11"></span></th>
+<th class="ac" onclick="App.sortTable(12)">完结率 <span class="sort-icon" id="si12"></span></th>
+</tr>
+</thead>
+<tbody id="tableBody"></tbody>
+</table>
+</div>
+</div>
+<div class="pagination" id="pagination"></div>
+</div>
+</div>
+</div>
+
+<div class="footer">
+<div class="footer-left">数据来源：吉客云 Open API</div>
+<div class="footer-center">最后刷新：<span id="lastRefresh"></span></div>
+<div class="footer-right">Marvis v2.0</div>
+</div>
+</div>
+</div>
+
+<button class="back-to-top" id="backToTop" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="返回顶部">&#x2191;</button>
+
+<script>

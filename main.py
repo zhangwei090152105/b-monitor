@@ -904,8 +904,35 @@ def generate_dashboard_html(stockout, stockin):
     # 自定义 JSON 序列化：确保整数不变成浮点数，null 保持不变
     json_data = json.dumps(data_obj, ensure_ascii=False, separators=(',', ':'))
 
-    # ---- 8. 拼接并写入 ----
-    html = template_before + '\nvar DATA = ' + json_data + ';\n' + template_after
+    # ---- 8. 写入 data.json（独立数据文件） ----
+    data_path = os.path.join(SCRIPT_DIR, 'data.json')
+    with open(data_path, 'w', encoding='utf-8') as f:
+        f.write(json_data)
+    data_kb = os.path.getsize(data_path) / 1024
+    print(f'✅ 数据文件已生成: {data_path} ({data_kb:.0f} KB)')
+
+    # ---- 9. 拼接 index.html（fetch 异步加载数据，体积从 ~800KB 瘦到 ~90KB） ----
+    # 剥离 template_after 尾部的 </script></body></html>，用 fetch 包装
+    stripped_after = template_after.rstrip()
+    if stripped_after.endswith('</html>'):
+        stripped_after = stripped_after[:-7].rstrip()
+    if stripped_after.endswith('</body>'):
+        stripped_after = stripped_after[:-7].rstrip()
+    if stripped_after.endswith('</script>'):
+        stripped_after = stripped_after[:-9].rstrip()
+
+    fetch_wrapper = (
+        '\n<script>\n'
+        'fetch("data.json").then(function(r){return r.json()}).then(function(DATA){\n'
+        + stripped_after +
+        '\n}).catch(function(e){'
+        'document.body.innerHTML=\'<div style="padding:80px;text-align:center;font-family:sans-serif;color:#888;font-size:18px">数据加载失败，请刷新页面重试</div>\';'
+        'console.error("看板数据加载失败:",e)});\n'
+        '</script>\n'
+        '</body>\n'
+        '</html>'
+    )
+    html = template_before + fetch_wrapper
 
     output_path = os.path.join(SCRIPT_DIR, 'index.html')
     with open(output_path, 'w', encoding='utf-8') as f:

@@ -53,7 +53,7 @@ jobs:
         run: python main.py
 
       - name: 推送看板 HTML
-        if: success()
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

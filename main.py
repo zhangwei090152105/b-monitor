@@ -57,7 +57,7 @@ WECOM_WEBHOOKS = [
 
 MIAODA_URL = os.environ.get('MIAODA_URL', '')
 
-数据日期
+# 数据日期
 B_MONITOR_DATE = os.environ.get('B_MONITOR_DATE', '') or date.today().strftime('%Y%m%d')
 
 # 输出目录（相对于脚本所在目录）
@@ -604,7 +604,7 @@ def send_wecom(stockout, stockin):
             print(f'❌ 企微推送异常: {e}')
 
 # ============================================================
-主流程
+# 主流程
 # ============================================================
 
 

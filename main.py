@@ -606,7 +606,7 @@ def send_wecom(stockout, stockin):
         parts.append(f'{i}. {brand}·{tp}　{n}单 / 待入 {int(q):,}件\n')
     parts.append('\n\n\n')
     if MIAODA_URL:
-        parts.append(f'{MIAODA_URL}')
+        parts.append(f'[查看数字看板]({MIAODA_URL})')
         parts.append('\n\n')
     parts.append(f'🕐 {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
 
@@ -908,7 +908,7 @@ def generate_dashboard_html(stockout, stockin):
     # ---- 8. 拼接并写入 ----
     html = template_before + '\nvar DATA = ' + json_data + ';\n' + template_after
 
-    output_path = os.path.join(OUT_DIR, 'index.html')
+    output_path = os.path.join(SCRIPT_DIR, 'index.html')
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html)
 

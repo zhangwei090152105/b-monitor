@@ -503,7 +503,7 @@ def send_email(excel_path, stockout, stockin):
   <th style="padding: 8px;">完结率</th>
 </tr>
 <tr style="background: #FFF3E0;">
-  <td style="padding: 8px; border: 1px solid #ddd;">📤 出库申请</td>
+  <td style="padding: 8px; border: 1px solid #ddd;">📤 出库</td>
   <td style="padding: 8px; border: 1px solid #ddd;">{so_cnt:,}</td>
   <td style="padding: 8px; border: 1px solid #ddd;">{so_brands}</td>
   <td style="padding: 8px; border: 1px solid #ddd;">{_safe_int(so_total):,}</td>
@@ -511,7 +511,7 @@ def send_email(excel_path, stockout, stockin):
   <td style="padding: 8px; border: 1px solid #ddd;">{so_rate:.1f}%</td>
 </tr>
 <tr style="background: #E3F2FD;">
-  <td style="padding: 8px; border: 1px solid #ddd;">📥 入库申请</td>
+  <td style="padding: 8px; border: 1px solid #ddd;">📥 入库</td>
   <td style="padding: 8px; border: 1px solid #ddd;">{si_cnt:,}</td>
   <td style="padding: 8px; border: 1px solid #ddd;">{si_brands}</td>
   <td style="padding: 8px; border: 1px solid #ddd;">{_safe_int(si_total):,}</td>
@@ -529,15 +529,14 @@ def send_email(excel_path, stockout, stockin):
 </table>
 
 <h3>📎 附件说明</h3>
-<p>jkyun_b_monitor_{B_MONITOR_DATE}.xlsx — Excel 报告 (4 sheet: 出库汇总/明细、入库汇总/明细)</p>
+<p>jkyun_b_monitor_{B_MONITOR_DATE}.xlsx — 4 sheet</p>
 
 <h3>🌐 数字看板</h3>
 <p>🔗 <a href="{MIAODA_URL}">{MIAODA_URL}</a></p>
 
 <hr style="border: none; border-top: 1px solid #ddd;">
 <p style="color: #999; font-size: 12px;">
-本邮件由 GitHub Actions 自动生成 · 每天 9:00 (北京时间) 自动发送<br>
-数据来源：吉客云 Open API
+本邮件由 Marvis 自动生成 · 每天 8:00 自动发送
 </p>
 </body></html>"""
 
@@ -591,24 +590,24 @@ def send_wecom(stockout, stockin):
     si_top5 = top5(stockin, 'totalUninnerCount', 'inTypeName')
 
     parts = []
-    parts.append(f'📢 吉客云B单未完结监控 · {B_MONITOR_DATE}')
-    parts.append('\n\n\n')
-    parts.append('📊 汇总\n')
-    parts.append(f'　出库 {so_cnt:,} 单 / 待出 {int(so_remain):,} 件\n')
-    parts.append(f'　入库 {si_cnt:,} 单 / 待入 {int(si_remain):,} 件')
-    parts.append('\n\n\n')
-    parts.append('🔴 出库 Top 5\n')
+    parts.append(f'📢 **吉客云B单未完结监控** · {B_MONITOR_DATE}')
+    parts.append('\n\n')
+    parts.append('📊 **汇总**\n')
+    parts.append(f'　出库 {so_cnt:,} 单 / 待出 **{int(so_remain):,}** 件\n')
+    parts.append(f'　入库 {si_cnt:,} 单 / 待入 **{int(si_remain):,}** 件')
+    parts.append('\n\n')
+    parts.append('🔴 **出库 Top 5**\n')
     for i, (brand, tp, n, q) in enumerate(so_top5, 1):
-        parts.append(f'{i}. {brand}·{tp}　{n}单 / 待出 {int(q):,}件\n')
-    parts.append('\n\n\n')
-    parts.append('🔵 入库 Top 5\n')
+        parts.append(f'{i}. **{brand}**·{tp}　{n}单 / 待出 **{int(q):,}**件\n')
+    parts.append('\n\n')
+    parts.append('🔵 **入库 Top 5**\n')
     for i, (brand, tp, n, q) in enumerate(si_top5, 1):
-        parts.append(f'{i}. {brand}·{tp}　{n}单 / 待入 {int(q):,}件\n')
-    parts.append('\n\n\n')
+        parts.append(f'{i}. **{brand}**·{tp}　{n}单 / 待入 **{int(q):,}**件\n')
+    parts.append('\n\n')
     if MIAODA_URL:
-        parts.append(f'[查看数字看板]({MIAODA_URL})')
+        parts.append(f'[🔗 查看数字看板]({MIAODA_URL})')
         parts.append('\n\n')
-    parts.append(f'🕐 {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+    parts.append(f'🕐 生成时间：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
 
     md_content = ''.join(parts)
 
@@ -931,7 +930,7 @@ if __name__ == '__main__':
     # ---------------------------------
     # 阶段 1: API 数据拉取
     # ---------------------------------
-    print('\n[阶段 1/4] API 数据拉取')
+    print('\n[阶段 1/5] API 数据拉取')
     print('-' * 40)
 
     print('[1.1] 拉取出库申请单...')

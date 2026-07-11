@@ -587,13 +587,16 @@ def send_wecom(stockout, stockin):
     md_content = ''.join(parts)
 
     for wh in WECOM_WEBHOOKS:
+        if not wh or not wh.strip():
+            print('  [企微] 跳过空 Webhook URL')
+            continue
         payload = {'msgtype': 'markdown', 'markdown': {'content': md_content}}
-        req = urllib.request.Request(
-            wh,
-            data=json.dumps(payload).encode('utf-8'),
-            headers={'Content-Type': 'application/json'}
-        )
         try:
+            req = urllib.request.Request(
+                wh,
+                data=json.dumps(payload).encode('utf-8'),
+                headers={'Content-Type': 'application/json'}
+            )
             resp = urllib.request.urlopen(req)
             result = json.loads(resp.read())
             if result.get('errcode') == 0:

@@ -93268,7 +93268,7 @@ var DATA = {
       "6977223353630"
     ]
   ],
-  "genTime": "2026/09/06 12:33:02",
+  "genTime": "2026/09/06 12:42:19",
   "soBizTop5": [
     [
       "生产领料",
@@ -305992,7 +305992,7 @@ var App = window.App = {
     else{b.style.display='none';c.style.display=''}
     try{localStorage.setItem('b-monitor-tab',tab)}catch(e){}
     var tabs=document.querySelectorAll('.main-tab');
-    for(var i=0;i<tabs.length;i++)tabs[i].classList.toggle('active',tabs[i].getAttribute('data-t')===tab);
+    for(var i=0;i<tabs.length;i++)tabs[i].classList.toggle('active',tabs[i].getAttribute('data-tab')===tab);
     if(tab==='c'&&window.CApp){
       if(!window.CApp._rendered){
         setTimeout(function(){window.CApp.init()},80);

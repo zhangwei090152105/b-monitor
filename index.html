@@ -401,6 +401,8 @@ tr.expand-row.show .expand-panel{max-height:500px;padding:14px 20px}
 .main-tab:hover{color:var(--text-primary);background:var(--bg-hover)}
 .main-tab.active{background:var(--glass-bg);color:#FFF;border-top:2px solid #4A90E2;border-color:var(--glass-border);box-shadow:0 -2px 12px rgba(0,0,0,.2)}
 .main-tab.active.c-tab{border-top-color:#F59E0B}
+.main-tab.active[data-tab="b"]{background:rgba(74,144,226,.20)!important;color:#4A90E2!important;border-color:#4A90E2!important;border-bottom:none!important;font-weight:700!important;box-shadow:inset 0 -3px 0 #4A90E2}
+.main-tab.active[data-tab="c"]{background:rgba(245,158,11,.20)!important;color:#F59E0B!important;border-color:#F59E0B!important;border-bottom:none!important;font-weight:700!important;box-shadow:inset 0 -3px 0 #F59E0B}
 [data-theme="light"] .main-tab.active{color:#1a1a2e}
 
 /* ===== C 单画布 ===== */
@@ -93266,7 +93268,7 @@ var DATA = {
       "6977223353630"
     ]
   ],
-  "genTime": "2026/09/06 11:43:51",
+  "genTime": "2026/09/06 12:33:02",
   "soBizTop5": [
     [
       "生产领料",
@@ -306146,7 +306148,7 @@ document.addEventListener('DOMContentLoaded',function(){
         ['cTopRepoSale','sale',12,'repo','so'],
         ['cTopRepoRc','returnchange',12,'repo','si']
       ];
-      cards.forEach(function(c){fill(c[0],c[1],c[3],c[4],topFor(c[1],c[2]))});
+      cards.forEach(function(c){fill(c[0],c[1],c[3],topFor(c[1],c[2]),c[4])});
     },
 
     topClick:function(el){
@@ -306486,7 +306488,8 @@ document.addEventListener('DOMContentLoaded',function(){
     renderTrend:function(){
       try{
         var box=this.get('cChart7');if(!box)return;
-        if(box.getClientRects().length===0)return; /* 容器隐藏（未切到 C 单）时跳过 echarts.init，避免 0 宽空白；等可见后再 init */
+        if(box.getClientRects().length===0){var rt=this._trendRetry||0;if(rt<8){this._trendRetry=rt+1;(function(s){setTimeout(function(){s.renderTrend()},150)})(this)}return;} /* 首次切到C单布局未就绪时延后重试，避免永久卡加载中 */
+        this._trendRetry=0;
         var self=this;
         var fs=self.cTrendBrand,ss=self.cTrendShop,rs=self.cTrendRepo,st=self.cTrendStart,en=self.cTrendEnd;
         var m={};
@@ -306535,7 +306538,7 @@ document.addEventListener('DOMContentLoaded',function(){
           series:[
             {name:'金额 ¥',type:'bar',data:arr('amount').map(function(v){return {value:v,itemStyle:{color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'#94A3B8'},{offset:1,color:'rgba(148,163,184,0.1)'}]),borderRadius:[6,6,0,0]}}}),barWidth:'40%',yAxisIndex:0},
             {name:'销售单数',type:'line',data:arr('sale'),smooth:true,itemStyle:{color:'#F59E0B'},lineStyle:{color:'#F59E0B',width:2.5},symbol:'circle',symbolSize:7,yAxisIndex:1},
-            {name:'退换单数',type:'line',data:arr('rc'),smooth:true,itemStyle:{color:'#3B82F6'},lineStyle:{color:'#3B82F6',width:2.5},symbol:'diamond',symbolSize:7,yAxisIndex:1},
+            {name:'退换单数',type:'line',data:arr('returnchange'),smooth:true,itemStyle:{color:'#3B82F6'},lineStyle:{color:'#3B82F6',width:2.5},symbol:'diamond',symbolSize:7,yAxisIndex:1},
             {name:'退款单数',type:'line',data:arr('refund'),smooth:true,itemStyle:{color:'#22C55E'},lineStyle:{color:'#22C55E',width:2.5},symbol:'triangle',symbolSize:7,yAxisIndex:1}
           ]
         });

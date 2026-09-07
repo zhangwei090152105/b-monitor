@@ -401,6 +401,8 @@ tr.expand-row.show .expand-panel{max-height:500px;padding:14px 20px}
 .main-tab:hover{color:var(--text-primary);background:var(--bg-hover)}
 .main-tab.active{background:var(--glass-bg);color:#FFF;border-top:2px solid #4A90E2;border-color:var(--glass-border);box-shadow:0 -2px 12px rgba(0,0,0,.2)}
 .main-tab.active.c-tab{border-top-color:#F59E0B}
+.main-tab.active[data-tab="b"]{background:rgba(74,144,226,.20)!important;color:#4A90E2!important;border-color:#4A90E2!important;border-bottom:none!important;font-weight:700!important;box-shadow:inset 0 -3px 0 #4A90E2}
+.main-tab.active[data-tab="c"]{background:rgba(245,158,11,.20)!important;color:#F59E0B!important;border-color:#F59E0B!important;border-bottom:none!important;font-weight:700!important;box-shadow:inset 0 -3px 0 #F59E0B}
 [data-theme="light"] .main-tab.active{color:#1a1a2e}
 
 /* ===== C 单画布 ===== */
@@ -65122,7 +65124,7 @@ var DATA = {
       "6977223353630"
     ]
   ],
-  "genTime": "2026/09/07 09:18:19",
+  "genTime": "2026/09/07 17:30:43",
   "soBizTop5": [
     [
       "采购退货",
@@ -307541,7 +307543,7 @@ document.addEventListener('DOMContentLoaded',function(){
     renderTrend:function(){
       try{
         var box=this.get('cChart7');if(!box)return;
-        if(box.getClientRects().length===0)return; /* 容器隐藏（未切到 C 单）时跳过 echarts.init，避免 0 宽空白；等可见后再 init */
+        if(box.getClientRects().length===0){var rt=this._trendRetry||0;if(rt<8){this._trendRetry=rt+1;(function(s){setTimeout(function(){s.renderTrend()},150)})(this)}return;} /* 首次切到C单布局未就绪时延后重试，避免永久卡加载中 */
         var self=this;
         var fs=self.cTrendBrand,ss=self.cTrendShop,rs=self.cTrendRepo,st=self.cTrendStart,en=self.cTrendEnd;
         var m={};
